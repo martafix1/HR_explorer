@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+.env/
+.vscode/
+data/*
+# !data/unR_meas_noHR_32_rdr227_humancenter_06-03-2026_14-30-14.npz
+phaseUnwrapingOutput.csv
