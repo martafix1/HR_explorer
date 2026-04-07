@@ -2,7 +2,7 @@
 This is WIP, therefore the refinement varies
 
 # Install info
-- ill try to get a list of what you need in your venv
+requirement for your venv are in requirements.txt
 - otherwise its just python3
 
 # Run instructions
