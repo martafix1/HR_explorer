@@ -1,17 +1,18 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QSlider, QApplication, QGraphicsRectItem
+    QLabel, QSlider, QApplication, QGraphicsRectItem, QSplitter
 )
 from PySide6.QtGui import QPalette, QColor, QPen, QBrush
 from PySide6.QtCore import Qt
 
-import sys
+import sys, types
 
 import numpy as np
 import scipy as sci
 import pyqtgraph as pg
 from superqt import QRangeSlider
 import visuals.utils as utils
+import visuals.param_controls as pctrl 
 
 """
 DOCS:
@@ -109,163 +110,116 @@ class HatchedBoundary():
 
 
 class PlotWindow(QWidget):
+    frames_ctrl             :   pctrl.RangeControl
+    azi_ctrl                :   pctrl.SliderControl
+    ele_ctrl                :   pctrl.SliderControl
+    range_ctrl              :   pctrl.SliderControl
+    stft_filters_ctrl       :   pctrl.RangeControl
+    stft_filters_strenght_ctrl   :   pctrl.SliderControl
+    stft_freqRange_ctrl     :   pctrl.RangeControl
+    stft_winLen_ctrl        :   pctrl.SliderControl
+    
+    
+
+    
     def __init__(self):
-        self.initDone = False
         super().__init__()
+        self.setWindowTitle("ParamControl demo")
+        self.resize(960, 580)
 
+        self.initDone = False
 
-        self.setWindowTitle("STFT Window")
-        self.resize(700, 500)
-
-        main_layout = QVBoxLayout(self)
-
-        # =========================
-        # --- TOP CONTROL PANEL ---
-        # =========================
-        controls = QVBoxLayout()
-
-        # --- Frame range (full width) ---
-        self.frame_range = QRangeSlider(Qt.Horizontal) # type: ignore
-        self.frame_range.setRange(0, 100)
-
-        self.frame_range_label = QLabel()
-        self.frame_range.valueChanged.connect(
-            self.update_onSliderMove
-        )
-        self.frame_range.setValue((10, 50))
-        self.frame_range_label.setText("10 - 50")
-        
-
-        self.frame_range.setStyleSheet("""
-        QRangeSlider {
-            qproperty-barColor: #3ddc84;
-        }
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setHandleWidth(6)
+        splitter.setStyleSheet("""
+            QSplitter::handle { background-color: #404040; }
+            QSplitter::handle:hover { background-color: #606060; }
         """)
 
-        # self.frame_range.setBarVisible(True)
+        # ── control panel ──────────────────────────────────────────────
+        ctrl_widget = QWidget()
+        # ctrl_widget.setStyleSheet("background-color: #2b2b2b;")
+        grid = QGridLayout(ctrl_widget)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setSpacing(6)
+
+        ctrl_panel = pctrl.ControlPanel(grid, callback=self.update_onSliderMove)
+
+        # row 0 — frame range, cols: 0-2
+        self.frames_ctrl = pctrl.RangeControl(
+            "Frames selector", min_val=0, max_val=100,
+            default=(15, 85), unit="s",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.frames_ctrl, row=0, col=0, col_span=3)
+
+    
+        # row 1 - Azimuth selector, col: 0
+        self.azi_ctrl = pctrl.SliderControl(
+            "Azimuth selector", min_val=0, max_val=100,
+            default=2, unit="°",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.azi_ctrl, row=1, col=0)
+
+        # row 1 - Elevation selector, col: 1
+        self.ele_ctrl = pctrl.SliderControl(
+            "Elevation selector", min_val=0, max_val=100,
+            default=1, unit="°",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.ele_ctrl, row=1, col=1)
+
+
+        # row 1 - range selector, col: 2
+        self.range_ctrl = pctrl.SliderControl(
+            "Range selector", min_val=0, max_val=100,
+            default=10, unit="m",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.range_ctrl, row=1, col=2)
+
+        # row 2 — Filter freq range, cols: 0-2
+        self.stft_filters_ctrl = pctrl.RangeControl(
+            "Filter freq selector", min_val=0, max_val=100,
+            default=(0, 100), unit="Hz",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_filters_ctrl, row=2, col=0, col_span=2)
+
+        # row 2 - Filter strenght selector, col: 2
+        self.stft_filters_strenght_ctrl = pctrl.SliderControl(
+            "Filter strenght", min_val=0, max_val=32,
+            default=0, unit="",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_filters_strenght_ctrl, row=2, col=2)
+
+        # row 3 — Shown frequencies range, cols: 0-2
+        self.stft_freqRange_ctrl = pctrl.RangeControl(
+            "Shown frequencies selector", min_val=0, max_val=100,
+            default=(0, 100), unit="Hz",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_freqRange_ctrl, row=3, col=0, col_span=2)
+
+        # row 3 - range selector, col: 2
+        self.stft_winLen_ctrl = pctrl.SliderControl(
+            "STFT window lenght", min_val=0, max_val=100,
+            default=50, unit="s",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_winLen_ctrl, row=3, col=2)
        
-        controls.addWidget(
-            make_slider_block(
-                "Frame start - Frame end",
-                self.frame_range,
-                self.frame_range_label
-            )
-        )
 
+        ctrl_widget.setMaximumHeight(80*4) # stuff is in control widget via the grid
 
+        # ── plot ───────────────────────────────────────────────────────
 
-        # --- grid for remaining sliders (2 rows x 3 cols) ---
-        grid = QGridLayout()
-        self._scrollWheel_filter = utils.SliderWheelFilter()
-        def make_named_slider(attr_name, label_text, row, col):
-            slider = QSlider(Qt.Horizontal) # type: ignore
-            slider.setRange(0, 100)
-            slider.installEventFilter(self._scrollWheel_filter)
-            value_label = QLabel()
-
-            slider.valueChanged.connect(
-                self.update_onSliderMove
-            )
-
-            slider.setValue(0)
-            value_label.setText("50")
-
-            setattr(self, attr_name, slider)
-            setattr(self, f"{attr_name}_label", value_label)
-
-            block = make_slider_block(label_text, slider, value_label)
-            grid.addWidget(block, row, col)
-
-        # row 1
-        self.azi_slider : QSlider
-        self.ele_slider : QSlider
-        self.range_slider : QSlider
-
-        self.azi_slider_label : QLabel
-        self.ele_slider_label : QLabel
-        self.range_slider_label : QLabel
-
-        make_named_slider("azi_slider", "Azimuth", 0, 0)
-        make_named_slider("ele_slider", "Elevation", 0, 1)
-        make_named_slider("range_slider", "Range", 0, 2)
-
-        # row 2
+        plot_widget = QWidget()
+        plot_widget.setStyleSheet("background-color: #1e1e1e;")
+        plot_layout = QVBoxLayout(plot_widget)
         
-        self.stft_LP_slider : QSlider
-        self.stft_HP_slider : QSlider
-        self.stft_LP_strenght_slider : QSlider
-        self.stft_HP_strenght_slider : QSlider
-        
-        self.stft_LP_slider_label : QLabel
-        self.stft_HP_slider_label : QLabel       
-        self.stft_LP_strenght_slider_label : QLabel
-        self.stft_HP_strenght_slider_label : QLabel
-
-        make_named_slider("stft_LP_slider", "Low pass", 1, 0)
-        make_named_slider("stft_HP_slider", "High pass", 1, 1)
-        make_named_slider("stft_LP_strenght_slider", "Low pass strenght", 1, 2)
-        make_named_slider("stft_HP_strenght_slider", "High pass strenght", 1, 3)
-
-        self.stft_LP_strenght_slider.setRange(0,32)
-        self.stft_HP_strenght_slider.setRange(0,32)
-
-        self.stft_HP_slider.setValue(100)
-        # row 3
-
-        self.stft_window_slider : QSlider
-        self.stft_window_slider_label : QLabel
-
-        self.stft_overshoot_slider : QSlider
-
-        make_named_slider("stft_window_slider", "Window lenght", 2, 0)
-        # self.stft_window_slider.valueChanged.connect(lambda text, : self.update_onSliderMove("Window"))
-        self.stft_window_slider.valueChanged.connect(self.update_onSliderMove)
-
-        self.freq_range = QRangeSlider(Qt.Horizontal) # type: ignore
-        self.freq_range.setRange(0, 100)
-
-        self.freq_range_label = QLabel()
-        self.freq_range.valueChanged.connect(
-            self.update_onSliderMove
-        )
-        self.freq_range.setValue((10, 50))
-        self.freq_range_label.setText("10 - 50")
-        
-
-        self.freq_range.setStyleSheet("""
-        QRangeSlider {
-            qproperty-barColor: #3ddc84;
-        }
-        """)
-
-        # self.frame_range.setBarVisible(True)
-       
-        grid.addWidget(
-            make_slider_block(
-                "Freq start - Freq end",
-                self.freq_range,
-                self.freq_range_label
-            ),2,0
-        )
-
-
-        
-
-        self.stft_window_slider_label : QLabel
-        
-
-
-
-        controls.addLayout(grid)
-
-        # limit total height of control area
-        controls_widget = QWidget()
-        controls_widget.setLayout(controls)
-        controls_widget.setMaximumHeight(180)
-
-        main_layout.addWidget(controls_widget)
-
-
         # --------- PLOT ----------
         plot_item = pg.PlotItem()
         plot_item.showAxes(True)
@@ -276,15 +230,7 @@ class PlotWindow(QWidget):
         pen.setWidth(0.1)
         pen.setStyle(Qt.DashLine)
 
-        # self.heatmap_validTime_begin_line = pg.InfiniteLine(pos=0, angle=90, pen=pen)
-        # self.heatmap_validTime_end_line =   pg.InfiniteLine(pos=0, angle=90, pen=pen)
-        
-        # self.heatmap_LP_line =   pg.InfiniteLine(pos=0, angle=0, pen=pen)
-        # self.heatmap_HP_line =   pg.InfiniteLine(pos=0, angle=0, pen=pen)
-        # plot_item.addItem(self.heatmap_validTime_begin_line)
-        # plot_item.addItem(self.heatmap_validTime_end_line)
-        # plot_item.addItem(self.heatmap_LP_line)
-        # plot_item.addItem(self.heatmap_HP_line)
+
         pen.setColor(pg.mkColor((230, 120, 10)))
         self.overShootBegin_boundary = HatchedBoundary(pen,plot_item,270)
         self.overShootEnd_boundary = HatchedBoundary(pen,plot_item,90)
@@ -304,7 +250,6 @@ class PlotWindow(QWidget):
 
 
         self.heatmap = pg.ImageView(view=plot_item)
-        # Optional: nicer color map
         colormap = pg.colormap.get("viridis")  # or "inferno", "plasma"
         self.heatmap.setColorMap(colormap)
 
@@ -313,49 +258,45 @@ class PlotWindow(QWidget):
         data = np.random.rand(20,40)
         self.heatmap.setImage(data)
 
+        plot_layout.addWidget(self.heatmap)
 
-        main_layout.addWidget(self.heatmap)
+        # ── finnish splitter ───────────────────────────────────────────
+        splitter.addWidget(ctrl_widget)
+        splitter.addWidget(plot_widget)
+        splitter.setSizes([220, 360])
+
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(splitter)
+        
         self.initDone = True
 
 
 
+
     def update_onSliderMove(self, source : str = "None"):
+        
+        frame0,frame1 = self.frames_ctrl.value()
+        azi_idx  = self.azi_ctrl.value()
+        ele_idx = self.ele_ctrl.value()
+        range_idx = self.range_ctrl.value()
+        
+        # todo: make this flash on range change
+        self.stft_winLen_ctrl.set_range(0,int((frame1-frame0)/2))
+        print(f"{(frame0-frame1)/2}, {frame0}, {frame1}")
+        stft_winLen = self.stft_winLen_ctrl.value()
+
+        
+        stft_height = int(np.ceil((stft_winLen+1)/2))
+        self.stft_filters_ctrl.set_range(0,stft_height)
+        filter0,filter1 = self.stft_filters_ctrl.value()
+
+        return
         if self.initDone == False:
             return
-        val_range = self.range_slider.value()
-        range_m = val_range*self.params["range_index2dist"]
-        self.range_slider_label.setText(f"idx: {val_range} ~ {range_m :.2f} m")
-
-        val_frame_begin,val_frame_end = self.frame_range.value()
-        frameTimes_s = (val_frame_begin* self.params["frame_index2time"],val_frame_end* self.params["frame_index2time"]) 
-        self.frame_range_label.setText(f"idx: {val_frame_begin} - {val_frame_end} ~ {frameTimes_s[0] :.2f} - {frameTimes_s[1] :.2f} s")
-        # sliders = {"Frame": 10,"Range":17}
-
-        val_azi = self.azi_slider.value()
-        azi_index2deg_scale =  ((2*self.params["DoA_azi_range_degs"]) / self.params["DoA_azi_N_elements"])
-        azi_index2deg_offset =  -1*self.params["DoA_azi_range_degs"] + azi_index2deg_scale/2
-        azi_deg = val_azi*azi_index2deg_scale + azi_index2deg_offset
-        self.azi_slider_label.setText(f"idx: {val_azi} - {azi_deg} deg")
         
         
-        val_ele = self.ele_slider.value()
-        ele_index2deg_scale =  ((2*self.params["DoA_ele_range_degs"]) / self.params["DoA_ele_N_elements"])
-        ele_index2deg_offset =  -1*self.params["DoA_ele_range_degs"] + ele_index2deg_scale/2
-        ele_deg = val_ele*ele_index2deg_scale + ele_index2deg_offset
-        self.ele_slider_label.setText(f"idx: {val_ele} - {ele_deg} deg")
-        
 
-        self.stft_window_slider.setRange(0,(val_frame_end-val_frame_begin)/2)
-        val_stft_win =  self.stft_window_slider.value()
-        self.stft_window_slider_label.setText(f"idx: {val_stft_win} - {val_stft_win*self.params["frame_index2time"] :.2f} s ")
-        # set ranges for filters
-        stft_height = int(np.ceil((val_stft_win+1)/2)) 
-        self.stft_HP_slider.setRange(0,stft_height)
-        self.stft_LP_slider.setRange(0,stft_height)
-
-        val_stft_LP =  self.stft_LP_slider.value()
-        
-        val_stft_HP =  self.stft_HP_slider.value()
+       
         # values updated bellow as soon as frequencies are known
 
         val_stft_LP_strenght = np.pow(2,self.stft_LP_strenght_slider.value()) 
@@ -430,13 +371,32 @@ class PlotWindow(QWidget):
         self.data4D = phaseUnwrapping(data)
         self.params = params
 
-        self.frame_range.setRange(params[ "i_Frames_begin"], params["i_Frames_end"]-1)
-        self.azi_slider.setRange(0, params["DoA_azi_N_elements"]-1)
-        self.ele_slider.setRange(0, params["DoA_ele_N_elements"]-1)
-        self.range_slider.setRange(0, params["i_Range_end"]-1)
+        self.frames_ctrl.set_range(params[ "i_Frames_begin"], params["i_Frames_end"]-1)
+        self.frames_ctrl.set_conv(lambda x: float(x*self.params["frame_index2time"]))
 
-        dataLen = params["i_Frames_end"]-params[ "i_Frames_begin"]
-        self.stft_window_slider.setValue(16)
+        self.azi_ctrl.set_range(0, params["DoA_azi_N_elements"]-1)
+        azi_index2deg_scale =  ((2*self.params["DoA_azi_range_degs"]) / self.params["DoA_azi_N_elements"])
+        azi_index2deg_offset =  -1*self.params["DoA_azi_range_degs"] + azi_index2deg_scale/2
+        self.azi_ctrl.set_conv(lambda x: float(x*azi_index2deg_scale + azi_index2deg_offset))
+
+        self.ele_ctrl.set_range(0, params["DoA_ele_N_elements"]-1)
+        ele_index2deg_scale =  ((2*self.params["DoA_ele_range_degs"]) / self.params["DoA_ele_N_elements"])
+        ele_index2deg_offset =  -1*self.params["DoA_ele_range_degs"] + ele_index2deg_scale/2
+        self.ele_ctrl.set_conv(lambda x: float(x*ele_index2deg_scale + ele_index2deg_offset))
+        
+        self.range_ctrl.set_range(0, params["i_Range_end"]-1)
+        self.range_ctrl.set_conv(lambda x: float(x*self.params["range_index2dist"]))
+
+        self.stft_winLen_ctrl.set_conv(lambda x: self.params["frame_index2time"]*x)
+        
+        self.stft_filters_strenght_ctrl.set_conv(lambda x: np.pow(2,x))
+        self.stft_filters_strenght_ctrl._value_str = types.MethodType( # printing needs special attention
+            lambda self: f"idx {self.value()} ~ {self._conv(self.value()):.2e}"
+            if self._conv else f"idx {self.value()}",
+            self.stft_filters_strenght_ctrl
+        )
+        # dataLen = params["i_Frames_end"]-params[ "i_Frames_begin"]
+        # self.stft_window_slider.setValue(16)
 
         self.update_onSliderMove()
         pass

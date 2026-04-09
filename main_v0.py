@@ -10,7 +10,8 @@ import processing.HR_process as HR_process
 
 import visuals.DoA_3Dmesh as DoA_3Dmesh
 import visuals.PhaseUnWr_plot as PhaseUnWr_plot
-import visuals.HR_STFT_plot as HR_STFT_plot
+# import visuals.HR_STFT_plot as HR_STFT_plot
+import visuals.HR_STFT_plot_2 as HR_STFT_plot
 import visuals.DoA_2DAziPlane as DoA_2DAziPlane
 
 params = { "i_Frames_begin":100,"i_Frames_end":600,
@@ -39,7 +40,7 @@ frames = loadedData["frames"]
 
 params = HR_process.defaultSliders(frames,params)
 
-# params["i_Frames_end"] = 100
+params["i_Frames_end"] = 100
 
 
 penteract, DoA_dict = HR_process.process_A(frames,params)
