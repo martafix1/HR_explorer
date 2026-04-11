@@ -14,11 +14,13 @@ import visuals.PhaseUnWr_plot as PhaseUnWr_plot
 import visuals.HR_STFT_plot_2 as HR_STFT_plot
 import visuals.DoA_2DAziPlane as DoA_2DAziPlane
 
+import visuals.param_controls as pctrl
+
 params = { "i_Frames_begin":100,"i_Frames_end":600,
             "i_Range_begin":5,"i_Range_end":30,
             "i_Doppler_begin":0,"i_Doppler_end":32,
             "DoA_azi_N_elements":8,
-            "DoA_ele_N_elements":2,
+            "DoA_ele_N_elements":1,
             "DoA_azi_range_degs":90, "DoA_ele_range_degs":30,
             "Channel_processing":"DoA_customFFT",
             # "Channel_processing":"None",
@@ -40,7 +42,7 @@ frames = loadedData["frames"]
 
 params = HR_process.defaultSliders(frames,params)
 
-params["i_Frames_end"] = 100
+# params["i_Frames_end"] = 100
 
 
 penteract, DoA_dict = HR_process.process_A(frames,params)

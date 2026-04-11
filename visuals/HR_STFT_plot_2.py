@@ -114,10 +114,12 @@ class PlotWindow(QWidget):
     azi_ctrl                :   pctrl.SliderControl
     ele_ctrl                :   pctrl.SliderControl
     range_ctrl              :   pctrl.SliderControl
-    stft_filters_ctrl       :   pctrl.RangeControl
-    stft_filters_strenght_ctrl   :   pctrl.SliderControl
-    stft_freqRange_ctrl     :   pctrl.RangeControl
     stft_winLen_ctrl        :   pctrl.SliderControl
+    stft_filters_ctrl       :   pctrl.RangeControl
+    stft_filters_strenght_ctrl          :   pctrl.SliderControl
+    stft_edgeSuppresion_strenght_ctrl   :   pctrl.SliderControl
+    stft_freqRange_ctrl     :   pctrl.RangeControl
+    
     
     
 
@@ -179,13 +181,21 @@ class PlotWindow(QWidget):
         )
         ctrl_panel.add(self.range_ctrl, row=1, col=2)
 
-        # row 2 — Filter freq range, cols: 0-2
+        # row 2 - window lenght selector, col: 0
+        self.stft_winLen_ctrl = pctrl.SliderControl(
+            "STFT window lenght", min_val=0, max_val=100,
+            default=50, unit="s",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_winLen_ctrl, row=2, col=0)
+
+        # row 2 — Filter freq range, cols: 1
         self.stft_filters_ctrl = pctrl.RangeControl(
             "Filter freq selector", min_val=0, max_val=100,
             default=(0, 100), unit="Hz",
             conv=lambda x: float(x),
         )
-        ctrl_panel.add(self.stft_filters_ctrl, row=2, col=0, col_span=2)
+        ctrl_panel.add(self.stft_filters_ctrl, row=2, col=1, col_span=1)
 
         # row 2 - Filter strenght selector, col: 2
         self.stft_filters_strenght_ctrl = pctrl.SliderControl(
@@ -195,21 +205,23 @@ class PlotWindow(QWidget):
         )
         ctrl_panel.add(self.stft_filters_strenght_ctrl, row=2, col=2)
 
-        # row 3 — Shown frequencies range, cols: 0-2
+        # row 3 - Filter strenght selector, col: 0
+        self.stft_edgeSuppresion_strenght_ctrl = pctrl.SliderControl(
+            "Edge suppresion strenght", min_val=0, max_val=32,
+            default=0, unit="",
+            conv=lambda x: float(x),
+        )
+        ctrl_panel.add(self.stft_edgeSuppresion_strenght_ctrl, row=3, col=0)
+        
+        # row 3 — Shown frequencies range, cols: 1-2
         self.stft_freqRange_ctrl = pctrl.RangeControl(
             "Shown frequencies selector", min_val=0, max_val=100,
             default=(0, 100), unit="Hz",
             conv=lambda x: float(x),
         )
-        ctrl_panel.add(self.stft_freqRange_ctrl, row=3, col=0, col_span=2)
+        ctrl_panel.add(self.stft_freqRange_ctrl, row=3, col=1, col_span=2)
 
-        # row 3 - range selector, col: 2
-        self.stft_winLen_ctrl = pctrl.SliderControl(
-            "STFT window lenght", min_val=0, max_val=100,
-            default=50, unit="s",
-            conv=lambda x: float(x),
-        )
-        ctrl_panel.add(self.stft_winLen_ctrl, row=3, col=2)
+       
        
 
         ctrl_widget.setMaximumHeight(80*4) # stuff is in control widget via the grid
@@ -274,63 +286,65 @@ class PlotWindow(QWidget):
 
 
     def update_onSliderMove(self, source : str = "None"):
+        if self.initDone == False:
+            return
         
-        frame0,frame1 = self.frames_ctrl.value()
+        frame0_idx,frame1_idx = self.frames_ctrl.value()
         azi_idx  = self.azi_ctrl.value()
         ele_idx = self.ele_ctrl.value()
         range_idx = self.range_ctrl.value()
         
         # todo: make this flash on range change
-        self.stft_winLen_ctrl.set_range(0,int((frame1-frame0)/2))
-        print(f"{(frame0-frame1)/2}, {frame0}, {frame1}")
+        self.stft_winLen_ctrl.set_range(0,int((frame1_idx-frame0_idx)/2))
+        # print(f"{(frame0_idx-frame1_idx)/2}, {frame0_idx}, {frame1_idx}")
         stft_winLen = self.stft_winLen_ctrl.value()
 
         
         stft_height = int(np.ceil((stft_winLen+1)/2))
         self.stft_filters_ctrl.set_range(0,stft_height)
-        filter0,filter1 = self.stft_filters_ctrl.value()
+        filter0_idx,filter1_idx = self.stft_filters_ctrl.value()
 
-        return
-        if self.initDone == False:
-            return
-        
-        
+        filter_strenght_idx = self.stft_filters_strenght_ctrl.value()
 
-       
+        self.stft_freqRange_ctrl.set_range(0,stft_height)
+        freq0_idx,freq1_idx = self.stft_freqRange_ctrl.value()
+        
+        edgeSuppres_strenght = self.stft_edgeSuppresion_strenght_ctrl.value()
+        
         # values updated bellow as soon as frequencies are known
 
-        val_stft_LP_strenght = np.pow(2,self.stft_LP_strenght_slider.value()) 
-        val_stft_HP_strenght = np.pow(2,self.stft_HP_strenght_slider.value()) 
-        self.stft_LP_strenght_slider_label.setText(f"idx: {val_stft_LP_strenght :.2e} - 2^{self.stft_LP_strenght_slider.value()}")
-        self.stft_HP_strenght_slider_label.setText(f"idx: {val_stft_HP_strenght :.2e} - 2^{self.stft_HP_strenght_slider.value()}")
-
-        #freq range
-        self.freq_range.setRange(0, stft_height)
-        val_freq_begin,val_freq_end = self.freq_range.value()
         
 
 
-        new_data = self.data4D[val_frame_begin:val_frame_end, val_range,val_ele,val_azi]
+        new_data = self.data4D[frame0_idx:frame1_idx, range_idx,ele_idx,azi_idx]
 
         # print(f"new_data shape: {new_data.shape}")
 
-        window_len = val_stft_win
+        window_len = stft_winLen
         win = sci.signal.windows.hann(np.max((1,window_len)) )
         STF =  sci.signal.ShortTimeFFT(win,hop = 2, fs = 1/self.params["frame_index2time"] )
         
         stftResult = np.abs(STF.stft(new_data)) 
         N_f, N_t = stftResult.shape
         # print(f"stft result (unrotated) shape: {stftResult.shape}")
-        stftResult[0:val_stft_LP,:] /= val_stft_LP_strenght
-        stftResult[val_stft_HP:0,:] /= val_stft_HP_strenght
-        stftResult = stftResult[val_freq_begin:val_freq_end,:] # cut the freq a bit
+        filter_strenght_val = np.pow(2,filter_strenght_idx)
+        stftResult[0:filter0_idx,:] /= filter_strenght_val
+        stftResult[filter1_idx:0,:] /= filter_strenght_val
+        
+        # this is strange but whatever:
+        edge_extent = int((window_len/2.0) - (np.mod(window_len-1,4)/2) -0.5) 
+        edgeSuppres_strenght_val = np.pow(2,edgeSuppres_strenght)
+        stftResult[:,0:edge_extent] /= edgeSuppres_strenght_val
+        stftResult[:,-edge_extent:-1] /= edgeSuppres_strenght_val
+
+        stftResult = stftResult[freq0_idx:freq1_idx,:] # cut the freq a bit
         stftResult = np.rot90(stftResult, k=-1)
 
         t0,t1,f0,f1 = STF.extent(new_data.shape[0])
         dt = (t1-t0)/N_t
         df = (f1-f0)/N_f
-        f1 -= ((N_f - val_freq_end)*df)
-        f0 += (val_freq_begin*df)
+        f1 -= ((N_f - freq1_idx)*df)
+        f0 += (freq0_idx*df)
 
 
 
@@ -356,11 +370,15 @@ class PlotWindow(QWidget):
 
 
 
-        self.LP_boundary.update_positions(val_stft_LP*df,t0,f0,t1,f1,dt,df)
-        self.HP_boundary.update_positions(val_stft_HP*df,t0,f0,t1,f1,dt,df)
-        self.stft_LP_slider_label.setText(f"idx < {val_stft_LP} - f < {val_stft_LP*df} Hz")
-        self.stft_HP_slider_label.setText(f"idx > {val_stft_HP} - f > {val_stft_HP*df} Hz ")
-        self.freq_range_label.setText(f"idx: {val_freq_begin} - {val_freq_end}, ~ {val_freq_begin*df :.3f} - {val_freq_end*df :.3f} Hz")
+        self.LP_boundary.update_positions(filter0_idx*df,t0,f0,t1,f1,dt,df)
+        self.HP_boundary.update_positions(filter1_idx*df,t0,f0,t1,f1,dt,df)
+
+        self.stft_filters_ctrl.set_conv(lambda x: float(df*x))
+        self.stft_freqRange_ctrl.set_conv(lambda x: float(df*x))
+
+        # self.stft_LP_slider_label.setText(f"idx < {filter0_idx} - f < {filter0_idx*df} Hz")
+        # self.stft_HP_slider_label.setText(f"idx > {filter1_idx} - f > {filter1_idx*df} Hz ")
+        # self.freq_range_label.setText(f"idx: {val_freq_begin} - {val_freq_end}, ~ {val_freq_begin*df :.3f} - {val_freq_end*df :.3f} Hz")
         
 
         # t = np.linspace(frameTimes_s[0],frameTimes_s[1], val_frame_end-val_frame_begin)
@@ -394,6 +412,12 @@ class PlotWindow(QWidget):
             lambda self: f"idx {self.value()} ~ {self._conv(self.value()):.2e}"
             if self._conv else f"idx {self.value()}",
             self.stft_filters_strenght_ctrl
+        )
+        self.stft_edgeSuppresion_strenght_ctrl.set_conv(lambda x: np.pow(2,x))
+        self.stft_edgeSuppresion_strenght_ctrl._value_str = types.MethodType( # printing needs special attention
+            lambda self: f"idx {self.value()} ~ {self._conv(self.value()):.2e}"
+            if self._conv else f"idx {self.value()}",
+            self.stft_edgeSuppresion_strenght_ctrl
         )
         # dataLen = params["i_Frames_end"]-params[ "i_Frames_begin"]
         # self.stft_window_slider.setValue(16)

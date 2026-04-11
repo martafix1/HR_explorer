@@ -94,15 +94,17 @@ def process_A(frames,sliders):
 
     # channel processing (DoA)
     dataIN = rangeDopplerData_lockedFramesRangesDoppler.astype(np.complex64)
-    doa_params = DoA.params
-    doa_params["azi_resolution_N"] = DoA_azi_N_elements
-    doa_params["ele_resolution_N"] = DoA_ele_N_elements
-    doa_params["azimuth_range"] = DoA_azi_range_degs
-    doa_params["elevation_range"] = DoA_ele_range_degs
-    doa_dict = DoA.create_DFT_matrix(doa_params)
+
     
 
     if(channel_processing == "DoA_customFFT"):
+        doa_params = DoA.params
+        doa_params["azi_resolution_N"] = DoA_azi_N_elements
+        doa_params["ele_resolution_N"] = DoA_ele_N_elements
+        doa_params["azimuth_range"] = DoA_azi_range_degs
+        doa_params["elevation_range"] = DoA_ele_range_degs
+        doa_dict = DoA.create_DFT_matrix(doa_params)
+
         dataIN = rangeDopplerData_lockedFramesRangesDoppler
         pStart = time.perf_counter()
 
@@ -156,12 +158,22 @@ def process_A(frames,sliders):
         # print(f"Einsum time: {pEnd-pStart}")
 
     else:
-        # move axis, put it all into azi vector
-        # TODO tryout
-        print("No DoA is likely wrong, work on it")
+        print("No DoA processing - changing parameters")
         dataOUT = np.moveaxis(dataIN,[2,3],[3,2])
-        flat = np.resize(dataOUT[:,:,:,0], (N_Frames, N_Doppler, N_Range, doa_dict["ele_mesh_range"] * doa_dict["azi_mesh_range"]))
-        dataOUT = flat.reshape(28, 15, 32,doa_dict["ele_mesh_range"] , doa_dict["azi_mesh_range"])
+        N_channels = dataOUT.shape[3]
+        dataOUT = np.reshape(dataOUT,(N_Frames, N_Doppler, N_Range,1,N_channels))
+        
+        doa_params = DoA.params
+        doa_params["azi_resolution_N"] = N_channels
+        doa_params["ele_resolution_N"] = 1
+        doa_params["azimuth_range"] = DoA_azi_range_degs
+        doa_params["elevation_range"] = DoA_ele_range_degs
+        doa_dict = DoA.create_DFT_matrix(doa_params)
+        sliders["DoA_azi_N_elements"] = N_channels
+        sliders["DoA_ele_N_elements"] = 1
+
+        # flat = np.resize(dataOUT[:,:,:,0], (N_Frames, N_Doppler, N_Range,  len(doa_dict["ele_mesh_range"]) *  len(doa_dict["azi_mesh_range"])))
+        # dataOUT = flat.reshape(N_Frames, N_Doppler, N_Range, len(doa_dict["ele_mesh_range"]) ,  len(doa_dict["azi_mesh_range"]))
         
         
         
