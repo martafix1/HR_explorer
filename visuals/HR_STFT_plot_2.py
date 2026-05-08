@@ -290,6 +290,9 @@ class PlotWindow(QWidget):
             return
         
         frame0_idx,frame1_idx = self.frames_ctrl.value()
+        frame0_idx -= self.params[ "i_Frames_begin"]
+        frame1_idx -= self.params[ "i_Frames_begin"]
+        
         azi_idx  = self.azi_ctrl.value()
         ele_idx = self.ele_ctrl.value()
         range_idx = self.range_ctrl.value()

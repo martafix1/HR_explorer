@@ -32,7 +32,8 @@ from PySide6.QtWidgets import (
     QApplication, QWidget, QMainWindow, QSplitter,
     QGroupBox, QHBoxLayout, QVBoxLayout, QGridLayout,
     QSlider, QSpinBox, QComboBox, QCheckBox, QPushButton,
-    QLabel, QSizePolicy, 
+    QLabel, QSizePolicy, QTableWidget, QTableWidgetItem,
+    QLineEdit, QHeaderView, QAbstractItemView, QAbstractScrollArea,
 )
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
@@ -110,7 +111,7 @@ import visuals.utils as utils
 _WHEEL_FILTER = utils.SliderWheelFilter()
 
 
-def _wheel_filter() -> _WheelFilter:
+def _wheel_filter() -> QObject:
     global _WHEEL_FILTER
     if _WHEEL_FILTER is None:
         _WHEEL_FILTER = _WheelFilter()
@@ -147,6 +148,7 @@ class ControlPanel:
         control: "ParamControl",
         row: int,
         col: int,
+        row_span: int = 1,
         col_span: int = 1,
     ) -> None:
         """Place *control* in the grid and wire its callback."""
@@ -155,7 +157,7 @@ class ControlPanel:
             if self._grid.columnStretch(c) == 0:
                 self._grid.setColumnStretch(c, 1)
 
-        self._grid.addWidget(control, row, col, 1, col_span)
+        self._grid.addWidget(control, row, col, row_span, col_span)
         control._set_callback(self._callback)
 
 
@@ -305,7 +307,6 @@ class ParamControl(QGroupBox):
 
         title = f"{self._name}  [{inner}]"
 
-        # append state message
         if self._state == _STATE_WARNING and self._state_msg:
             title += f"  ⚠ warn: {self._state_msg}"
         elif self._state == _STATE_ERROR and self._state_msg:
@@ -481,6 +482,8 @@ class RangeControl(ParamControl):
         self._min = min_val
         self._max = max_val
         self._default = default or (min_val, max_val)
+        self._lock_range = False
+        self._last_range = self._default
         super().__init__(name, unit, conv)
         self._silent_set(self._default)
 
@@ -502,9 +505,23 @@ class RangeControl(ParamControl):
         self._rslider.setStyleSheet("QRangeSlider { qproperty-barColor: #3ddc84; }")
         self._rslider.installEventFilter(_wheel_filter())
 
+        self._lock_checkbox = QCheckBox("")
+        self._lock_checkbox.setToolTip("Lock the range endpoints together when moving either handle")
+        self._lock_checkbox.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+        self._lock_checkbox.setContentsMargins(0, 0, 0, 0)
+        self._lock_checkbox.setStyleSheet(
+            "QCheckBox { margin: 0px; padding: 0px 4px; }"
+            "QCheckBox::indicator { margin-right: 2px; }"
+        )
+        self._lock_checkbox.toggled.connect(self._on_lock_toggled)
+
+        self._inner_layout.setContentsMargins(0, 0, 0, 0)
+        self._inner_layout.setSpacing(6)
+
         self._inner_layout.addWidget(self._spin_lo)
         self._inner_layout.addWidget(self._rslider, stretch=1)
         self._inner_layout.addWidget(self._spin_hi)
+        self._inner_layout.addWidget(self._lock_checkbox)
 
         self._rslider.valueChanged.connect(self._on_rslider)
         self._spin_lo.valueChanged.connect(self._on_spin_lo)
@@ -515,7 +532,20 @@ class RangeControl(ParamControl):
     def _on_rslider(self, vals) -> None:
         if self._syncing:
             return
+        old_lo, old_hi = self._last_range
         lo, hi = vals
+        if self._lock_range:
+            delta_lo = lo - old_lo
+            delta_hi = hi - old_hi
+            if delta_lo != delta_hi:
+                delta = delta_lo if abs(delta_lo) >= abs(delta_hi) else delta_hi
+                lo = old_lo + delta
+                hi = old_hi + delta
+                lo, hi = self._clamp_locked_range(lo, hi)
+                self._syncing = True
+                self._rslider.setValue((lo, hi))
+                self._syncing = False
+        self._last_range = (lo, hi)
         self._syncing = True
         self._spin_lo.setValue(lo)
         self._spin_hi.setValue(hi)
@@ -525,23 +555,47 @@ class RangeControl(ParamControl):
     def _on_spin_lo(self, v: int) -> None:
         if self._syncing:
             return
-        hi = self._rslider.value()[1]
+        old_lo, old_hi = self._rslider.value()
+        if self._lock_range:
+            new_lo = v
+            new_hi = old_hi + (new_lo - old_lo)
+            new_lo, new_hi = self._clamp_locked_range(new_lo, new_hi)
+            self._syncing = True
+            self._rslider.setValue((new_lo, new_hi))
+            self._syncing = False
+            self._last_range = (new_lo, new_hi)
+            self._emit()
+            return
+        hi = old_hi
         if v > hi:
             v = hi
         self._syncing = True
         self._rslider.setValue((v, hi))
         self._syncing = False
+        self._last_range = (v, hi)
         self._emit()
 
     def _on_spin_hi(self, v: int) -> None:
         if self._syncing:
             return
-        lo = self._rslider.value()[0]
+        old_lo, old_hi = self._rslider.value()
+        if self._lock_range:
+            new_hi = v
+            new_lo = old_lo + (new_hi - old_hi)
+            new_lo, new_hi = self._clamp_locked_range(new_lo, new_hi)
+            self._syncing = True
+            self._rslider.setValue((new_lo, new_hi))
+            self._syncing = False
+            self._last_range = (new_lo, new_hi)
+            self._emit()
+            return
+        lo = old_lo
         if v < lo:
             v = lo
         self._syncing = True
         self._rslider.setValue((lo, v))
         self._syncing = False
+        self._last_range = (lo, v)
         self._emit()
 
     def _silent_set(self, v: tuple[int, int]) -> None:
@@ -551,7 +605,21 @@ class RangeControl(ParamControl):
         self._spin_lo.setValue(lo)
         self._spin_hi.setValue(hi)
         self._syncing = False
+        self._last_range = (lo, hi)
         self._refresh_title()
+
+    def _clamp_locked_range(self, lo: int, hi: int) -> tuple[int, int]:
+        span = hi - lo
+        if lo < self._min:
+            lo = self._min
+            hi = lo + span
+        if hi > self._max:
+            hi = self._max
+            lo = hi - span
+        return lo, hi
+
+    def _on_lock_toggled(self, checked: bool) -> None:
+        self._lock_range = checked
 
     # ---- public API ----
 
@@ -579,6 +647,7 @@ class RangeControl(ParamControl):
         self._spin_lo.setValue(new_lo)
         self._spin_hi.setValue(new_hi)
         self._syncing = False
+        self._last_range = (new_lo, new_hi)
         self._refresh_title()
 
     def _value_str(self) -> str:
@@ -589,7 +658,294 @@ class RangeControl(ParamControl):
 
 
 # ---------------------------------------------------------------------------
-# ComboControl
+# DictTableControl
+# ---------------------------------------------------------------------------
+
+class DictTableControl(ParamControl):
+    """
+    Table of named parameters with strongly typed input.
+
+    value() returns a dict of current values.
+    value_tuple() returns a tuple of values in the original dict order.
+    """
+
+    _MAX_HEIGHT = 280
+
+    def __init__(
+        self,
+        name: str,
+        params: dict[str, int | float | str | bool | list[str]],
+        orientation: str = "horizontal",
+    ):
+        if orientation not in ("horizontal", "vertical"):
+            raise ValueError("orientation must be 'horizontal' or 'vertical'")
+
+        self._orientation = orientation
+        self._param_names = list(params.keys())
+        self._types: dict[str, type] = {}
+        self._options: dict[str, list[str]] = {}
+        self._values: dict[str, int | float | str | bool] = {}
+        self._edits: dict[str, QWidget] = {}
+
+        for param_name, value in params.items():
+            if isinstance(value, list):
+                self._types[param_name] = list
+                self._options[param_name] = [str(item) for item in value]
+                self._values[param_name] = self._options[param_name][0] if self._options[param_name] else ""
+            else:
+                self._types[param_name] = type(value)
+                self._values[param_name] = value
+
+        super().__init__(name)
+
+        if self._orientation == "vertical":
+            self.setMaximumHeight(16777215)
+
+        self._warning_timer = QTimer(self)
+        self._warning_timer.setSingleShot(True)
+        self._warning_timer.timeout.connect(self._clear_warning_state)
+        self._silent_set(self._values)
+
+    def _build_interior(self) -> None:
+        self._table = QTableWidget()
+        self._table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._table.setShowGrid(True)
+        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self._table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+        if self._orientation == "horizontal":
+            self._table.setRowCount(2)
+            self._table.setColumnCount(len(self._param_names))
+            self._table.setVerticalHeaderLabels(["Name", "Value"])
+            self._table.verticalHeader().setVisible(True)
+            self._table.horizontalHeader().setVisible(False)
+            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self._table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+            for col, name in enumerate(self._param_names):
+                item = QTableWidgetItem(name)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._table.setItem(0, col, item)
+
+                widget = self._make_param_widget(name)
+                self._table.setCellWidget(1, col, widget)
+                self._edits[name] = widget
+        else:
+            self._table.setRowCount(len(self._param_names))
+            self._table.setColumnCount(2)
+            self._table.setHorizontalHeaderLabels(["Name", "Value"])
+            self._table.horizontalHeader().setVisible(True)
+            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self._table.verticalHeader().setVisible(False)
+            self._table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+
+            for row, name in enumerate(self._param_names):
+                item = QTableWidgetItem(name)
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self._table.setItem(row, 0, item)
+
+                widget = self._make_param_widget(name)
+                self._table.setCellWidget(row, 1, widget)
+                self._edits[name] = widget
+
+        self._inner_layout.addWidget(self._table)
+
+    def _make_edit_handler(self, name: str) -> Callable[[], None]:
+        def handler() -> None:
+            if self._syncing:
+                return
+            self._on_edit_finished(name)
+        return handler
+
+    def _on_checkbox_changed(self, name: str, state: int) -> None:
+        if self._syncing:
+            return
+        self._values[name] = bool(state == Qt.CheckState.Checked.value)
+        self.clear_state()
+        self._refresh_title()
+        self._emit()
+
+    def _on_combo_changed(self, name: str, _: int) -> None:
+        if self._syncing:
+            return
+        widget = self._edits[name]
+        if isinstance(widget, QComboBox):
+            self._values[name] = widget.currentText()
+            self.clear_state()
+            self._refresh_title()
+            self._emit()
+
+    def _make_param_widget(self, name: str) -> QWidget:
+        expected_type = self._types[name]
+        if expected_type is bool:
+            widget = QCheckBox()
+            widget.setChecked(bool(self._values[name]))
+            widget.setToolTip("Expected bool")
+            widget.stateChanged.connect(lambda state, name=name: self._on_checkbox_changed(name, state))
+            return widget
+
+        if expected_type is list:
+            widget = QComboBox()
+            options = self._options.get(name, [])
+            widget.addItems(options)
+            current = str(self._values[name])
+            idx = widget.findText(current)
+            if idx >= 0:
+                widget.setCurrentIndex(idx)
+            widget.setToolTip("Select an option")
+            widget.currentIndexChanged.connect(lambda _idx, name=name: self._on_combo_changed(name, _idx))
+            return widget
+
+        widget = QLineEdit()
+        widget.setText(str(self._values[name]))
+        widget.setToolTip(f"Expected {self._data_type_name(expected_type)}")
+        widget.editingFinished.connect(self._make_edit_handler(name))
+        return widget
+
+    def _silent_set(self, params: dict[str, int | float | str | bool]) -> None:
+        self._syncing = True
+        self._values = dict(params)
+        for name, widget in self._edits.items():
+            if isinstance(widget, QLineEdit):
+                widget.setText(str(self._values[name]))
+            elif isinstance(widget, QCheckBox):
+                widget.setChecked(bool(self._values[name]))
+            elif isinstance(widget, QComboBox):
+                idx = widget.findText(str(self._values[name]))
+                if idx >= 0:
+                    widget.setCurrentIndex(idx)
+        self._syncing = False
+        self._refresh_title()
+
+    def value(self) -> dict[str, int | float | str | bool]:
+        return dict(self._values)
+
+    def value_tuple(self) -> tuple[int | float | str | bool, ...]:
+        return tuple(self._values[name] for name in self._param_names)
+
+    def set_value(self, v: dict[str, int | float | str | bool]) -> None:
+        for name, value in v.items():
+            if name in self._values:
+                expected_type = self._types[name]
+                if expected_type is float and isinstance(value, int):
+                    value = float(value)
+                if expected_type is list:
+                    if isinstance(value, str) and value in self._options.get(name, []):
+                        self._values[name] = value
+                        continue
+                    raise TypeError(
+                        f"Parameter '{name}' must be one of {self._options.get(name, [])}, got {value}"
+                    )
+                if not isinstance(value, expected_type):
+                    raise TypeError(
+                        f"Parameter '{name}' must be {expected_type.__name__}, got {type(value).__name__}"
+                    )
+                self._values[name] = value
+        self._silent_set(self._values)
+
+    def set_range(self, lo: int, hi: int) -> None:
+        pass
+
+    def _data_type_name(self, expected_type: type) -> str:
+        if expected_type is int:
+            return "int"
+        if expected_type is float:
+            return "float"
+        if expected_type is bool:
+            return "bool"
+        if expected_type is list:
+            return "select"
+        return "text"
+
+    def _parse_value(self, raw: str, expected_type: type) -> int | float | str:
+        if expected_type is int:
+            if raw.strip() == "":
+                raise ValueError("Empty int")
+            return int(raw)
+        if expected_type is float:
+            if raw.strip() == "":
+                raise ValueError("Empty float")
+            return float(raw)
+        return raw
+
+    def _on_edit_finished(self, name: str) -> None:
+        edit_widget = self._edits[name]
+        if not isinstance(edit_widget, QLineEdit):
+            return
+        raw = edit_widget.text()
+        expected_type = self._types[name]
+        try:
+            parsed = self._parse_value(raw, expected_type)
+        except ValueError:
+            self._warn_invalid(name, expected_type)
+            return
+
+        previous = self._values[name]
+        if parsed == previous and self._state != _STATE_WARNING:
+            return
+
+        self._values[name] = parsed
+        self.clear_state()
+        self._refresh_title()
+        self._emit()
+
+    def _warn_invalid(self, name: str, expected_type: type) -> None:
+        edit_widget = self._edits[name]
+        if isinstance(edit_widget, QLineEdit):
+            edit_widget.setText(str(self._values[name]))
+        self.set_warning(f"{name}: expected {self._data_type_name(expected_type)}")
+        self._warning_timer.start(1800)
+
+    def _clear_warning_state(self) -> None:
+        if self._state == _STATE_WARNING:
+            self.clear_state()
+        # if self._state == _STATE_ERROR:    
+        #     self.clear_state()
+
+    def _value_str(self) -> str:
+        return ", ".join(
+            f"{name}={self._values[name]}" for name in self._param_names
+        )
+
+    # custom so it does not show the values in title
+    def _refresh_title(self) -> None:
+        title = self._name
+        if self._state == _STATE_WARNING and self._state_msg:
+            title += f"  ⚠ warn: {self._state_msg}"
+        elif self._state == _STATE_ERROR and self._state_msg:
+            title += f"  ⛒ err: {self._state_msg}"
+        self.setTitle(title)
+
+    def set_newParams(self, params: dict[str, int | float | str | bool | list[str]]) -> None:
+        """Replace the entire parameter set with a new dict, rebuilding the table."""
+        self._param_names = list(params.keys())
+        self._types: dict[str, type] = {}
+        self._options: dict[str, list[str]] = {}
+        self._values: dict[str, int | float | str | bool] = {}
+        self._edits: dict[str, QWidget] = {}
+
+        for param_name, value in params.items():
+            if isinstance(value, list):
+                self._types[param_name] = list
+                self._options[param_name] = [str(item) for item in value]
+                self._values[param_name] = self._options[param_name][0] if self._options[param_name] else ""
+            else:
+                self._types[param_name] = type(value)
+                self._values[param_name] = value
+
+        # Remove the old table widget before rebuilding.
+        if hasattr(self, "_table") and self._table is not None:
+            self._inner_layout.removeWidget(self._table)
+            self._table.setParent(None)
+            self._table.deleteLater()
+
+        self._build_interior()
+        self._silent_set(self._values)
+        self._emit()
 # ---------------------------------------------------------------------------
 
 class ComboControl(ParamControl):
@@ -681,8 +1037,8 @@ class ChecksetControl(ParamControl):
     def value(self) -> list[bool]:
         return [cb.isChecked() for cb in self._boxes]
 
-    def set_value(self, vals: list[bool]) -> None:
-        self._silent_set(vals)
+    def set_value(self, v: list[bool]) -> None:
+        self._silent_set(v)
 
     def _value_str(self) -> str:
         checked = [l for l, cb in zip(self._labels, self._boxes) if cb.isChecked()]
@@ -745,6 +1101,7 @@ if __name__ == "__main__":
         phase_ctrl:   RangeControl
         wave_ctrl:    ComboControl
         flags_ctrl:   ChecksetControl
+        param_table_ctrl: DictTableControl
         reset_ctrl:   ButtonControl
 
         def __init__(self):
@@ -802,13 +1159,25 @@ if __name__ == "__main__":
                 labels=["invert", "noise", "DC offset"],
                 defaults=[False, False, False],
             )
+            self.param_table_ctrl = DictTableControl(
+                "Extra params",
+                params={
+                    "Scale": 1.0,
+                    "Offset": 0.0,
+                    "Label": "demo",
+                    "Enabled": False,
+                    "Mode": ["auto", "manual", "test"],
+                },
+                orientation="vertical",
+            )
             self.reset_ctrl = ButtonControl("Actions", button_label="Reset all")
             self.reset_ctrl._btn.clicked.connect(self._reset_all)
 
             panel.add(self.flags_ctrl, row=2, col=0, col_span=2)
             panel.add(self.reset_ctrl, row=2, col=2)
+            panel.add(self.param_table_ctrl, row=0, col=3, row_span=3)
 
-            ctrl_widget.setMaximumHeight(240)
+            ctrl_widget.setMaximumHeight(320)
 
             # ── plot ───────────────────────────────────────────────────────
             plot_widget = QWidget()
@@ -858,7 +1227,14 @@ if __name__ == "__main__":
             if flags[2]:   # DC offset
                 y = y + amp * 0.5
 
+            params = self.param_table_ctrl.value()
+            scale = params["Scale"]
+            offset = params["Offset"]
+            label = params["Label"]
+            y = y * scale + offset
+
             self._curve.setData(x_plot, y)
+            self._pw.setTitle(f"{label}  {self.param_table_ctrl.value_tuple()}")
 
             # show Δ on the amp slider as a demo
             self.amp_ctrl.set_delta(float(amp))
@@ -869,6 +1245,13 @@ if __name__ == "__main__":
             self.phase_ctrl.set_value((30, 270))
             self.wave_ctrl.set_value("sine")
             self.flags_ctrl.set_value([False, False, False])
+            self.param_table_ctrl.set_value({
+                "Scale": 1.0,
+                "Offset": 0.0,
+                "Label": "demo",
+                "Enabled": False,
+                "Mode": "auto",
+            })
             self.on_change()
 
     window = DemoWindow()

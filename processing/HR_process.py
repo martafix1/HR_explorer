@@ -78,6 +78,7 @@ def process_A(frames,sliders):
     # reduce frames
     frames_lockedFrames = frames[i_Frames_begin:i_Frames_end,:,:,:]
     
+    time_start = time.perf_counter()    
     # process range
     rangeData_lockedFrames = np.fft.fft(frames_lockedFrames,axis=3) # range fft
     # reduce ranges 
@@ -176,8 +177,8 @@ def process_A(frames,sliders):
         # dataOUT = flat.reshape(N_Frames, N_Doppler, N_Range, len(doa_dict["ele_mesh_range"]) ,  len(doa_dict["azi_mesh_range"]))
         
         
-        
-    
+    time_done = time.perf_counter()    
+    print(f"Processing time: {time_done-time_start}")
     penteract = dataOUT
 
     azi_mesh_points = doa_dict["azi_mesh_range"]

@@ -2,7 +2,7 @@
 import numpy as np
 import sys, os
 
-import scipy.signal
+import scipy
 
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
@@ -32,6 +32,9 @@ params = {  "DoA_azi_N_elements":8,
 filePath = "data/unR_meas_noHR_32_rdr227_humancenter_06-03-2026_14-30-14.npz" 
 # filePath = "data/unR_meas_noHR_33_rdr227_humancenterlowsitting_06-03-2026_14-33-03.npz"
 
+filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_21_michalauto_radarvodorovne_stani_24-04-2026_14-32-50.npz"
+
+
 loadedData = loadNPZ(filePath)
 
 frames = loadedData["frames"]
@@ -39,24 +42,16 @@ frames = loadedData["frames"]
 params = HR_process.defaultSliders(frames,params)
 
 
-
-
 frames0 = 200
 frames1 = -200
-
 params["i_Frames_begin"] += frames0
 params["i_Frames_end"] += frames1
-
 params["i_Range_begin"] = 25
 params["i_Range_end"] = 26
 
-
-
 t0 = params["i_Frames_begin"] * params["frame_index2time"]
 t1 = params["i_Frames_end"] * params["frame_index2time"]
-
 x = np.linspace(t0,t1, params["i_Frames_end"] -params["i_Frames_begin"] )
-
 
 doppler_bin = 0
 ele_bin = 0

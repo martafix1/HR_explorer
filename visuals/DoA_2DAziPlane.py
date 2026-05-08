@@ -16,6 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import visuals.utils
 import visuals.param_controls as pctrl 
+import processing.cfar as cfar
 
 
 
@@ -35,6 +36,7 @@ class PlotWindow(QWidget):
     range_ctrl               :   pctrl.RangeControl
     doppler_ctrl             :   pctrl.RangeControl
     doppler_aggregation_ctrl :   pctrl.ComboControl
+    cfar_table_ctrl          :   pctrl.DictTableControl
     
 
     def __init__(self):
@@ -100,6 +102,30 @@ class PlotWindow(QWidget):
             )
         ctrl_panel.add(self.doppler_aggregation_ctrl, row=2, col=2)
 
+        cfar_ctrl :   pctrl.ComboControl
+
+        # self.cfar_ctrl = pctrl.ComboControl(
+        #         "CFAR selector",
+        #         options=["None", "CA_CFAR_2D - show treshold"
+        #                  "CA_CFAR_2D - results"],
+        #         default=0,
+        #     )
+        # ctrl_panel.add(self.doppler_aggregation_ctrl, row=3, col=0)
+
+        self.cfar_table_ctrl = pctrl.DictTableControl(
+                "CFAR params",
+                params={
+                    "Show": ["none","treshold","targets"],
+                    "Method": ["CA 2D CFAR", "cMax 2D CFAR"],
+                    "guard range": 1,
+                    "train range": 1,
+                    "guard azi": 1,
+                    "train azi": 1,
+                },
+                orientation="vertical",
+            )
+        ctrl_panel.add(self.cfar_table_ctrl, row=0, col=4,row_span=3)
+
         ctrl_widget.setMaximumHeight(80*2) # stuff is in control widget via the grid
 
         # ── plot ───────────────────────────────────────────────────────
@@ -140,8 +166,9 @@ class PlotWindow(QWidget):
         self.initDone = True
         # self.update_onSliderMove()
         # self.on_change()   # initial draw
-
-    def _drawPolarAxes(self,r0 = 0, r1=2,phi0 = -90,phi1 = 90, dr = 0.5, dphi = 45):
+    
+    # the r0,1 and phi0,1 shall be edges, not centers
+    def _drawPolarAxes(self,r0 = 0, r1=2,phi0 = -90,phi1 = 90, dr = 0.5, dphi = 45,skip_rangeLabels = 2):
         #def draw_polar_grid(self, plot_item, r_max, r_steps=4, theta_steps=8):
         # clear old items
         for item in self.PolarAxisItems:
@@ -152,37 +179,49 @@ class PlotWindow(QWidget):
         r_values = np.arange(r0, r1 + dr/2, dr)
         r_values = np.append(r_values, r1)
         # r_values = np.append(r_values, r0)
-        for r in r_values:
+        for i,r in enumerate(r_values):
             path = QtGui.QPainterPath()
             path.arcMoveTo(-r, -r, 2*r, 2*r, phi0 -90)
             path.arcTo(-r, -r, 2*r, 2*r, phi0 -90, (phi1-phi0))
 
             arc_item = QtWidgets.QGraphicsPathItem(path)
-            arc_item.setPen(pg.mkPen((150, 150, 150, 100)))
+            if i%skip_rangeLabels == 0:
+                arc_item.setPen(pg.mkPen((150, 150, 150, 100)))
+            else:
+                arc_item.setPen(pg.mkPen((150, 150, 150, 50)))
             self.plot_item.addItem(arc_item)
             self.PolarAxisItems.append(arc_item)
 
             # --- radius label ---
-            label = pg.TextItem(f"{r:.2f}", anchor=(0, 0.5))
+            if i%skip_rangeLabels == 0:
+                center_r = r + dr/2
+                label = pg.TextItem(f"{center_r:.2f}", anchor=(0, 0.5))
             
-            # small horizontal offset so it’s not on top of the axis
-            label.setPos(0.05 * dr, r)
+                # small horizontal offset so it’s not on top of the axis
+                label.setPos(0.1 * dr, center_r)
 
-            self.plot_item.addItem(label)
-            self.PolarAxisItems.append(label)
+                self.plot_item.addItem(label)
+                self.PolarAxisItems.append(label)
 
-        # --- radial lines (angles) ---
-        #this would work if it were linspace :) need 1/2 dphi to be sure that the phi1 fits in and then need another one coz the dphi is to count the values and the edges are one more.
-        # theta_values = np.deg2rad(np.arange(phi0, phi1 + dphi*1/2, dphi))
-        # +2 coz +1 to fit in the last value and +1 coz we want edges not centers
-        theta_values = np.linspace(phi0,phi1, int(np.ceil((phi1-phi0)/dphi)) +2  )
-        for theta in np.deg2rad(theta_values):
-            x = r1 * np.sin(theta) #not normal in order to keep y positive - facing up
-            y = r1 * np.cos(theta)
-            line = QtWidgets.QGraphicsLineItem(0, 0, x, y)
-            line.setPen(pg.mkPen((150, 150, 150, 100)))
-            self.plot_item.addItem(line)
-            self.PolarAxisItems.append(line)
+        # --- radial lines (angles) ---        
+        theta_values = np.arange(phi0, phi1 + dphi*1/2, dphi/2)
+        theta_values_centers = np.arange(phi0, phi1, dphi) + dphi/2
+
+        for i,theta in enumerate(np.deg2rad(theta_values)):
+            if i%2 == 0: # edge
+                r = r1 + 2*dr
+                pen = pg.mkPen((150, 150, 150, 100))
+            else: # center
+                r = r1 
+
+            x = r * np.sin(theta) #not normal in order to keep y positive - facing up
+            y = r * np.cos(theta)
+            if i%2==0:
+                line = QtWidgets.QGraphicsLineItem(0, 0, x, y)
+                pen = pg.mkPen((150, 150, 150, 100))
+                line.setPen(pen)
+                self.plot_item.addItem(line)
+                self.PolarAxisItems.append(line)
 
             # --- label ---
             label = pg.TextItem(f"{np.rad2deg(theta) :.0f}°", anchor=(0.5, 0.5))
@@ -200,6 +239,12 @@ class PlotWindow(QWidget):
             return
         
         frame0,frame1 = self.frames_ctrl.value()
+        frame0 -= self.params[ "i_Frames_begin"]
+        frame1 -= self.params[ "i_Frames_begin"]
+        what2show, method, g_range,t_range, g_azi,t_azi =  self.cfar_table_ctrl.value_tuple()
+        
+
+
         doppler0,doppler1 = self.doppler_ctrl.value()
         range0,range1 = self.range_ctrl.value()
         new_data = np.abs(self.penteract[frame0:frame1,doppler0:doppler1,range0:range1,0,:]) 
@@ -207,23 +252,48 @@ class PlotWindow(QWidget):
         #axis 0 is now doppler:
         new_data = aggregate(new_data,axis=0, ag_type= self.doppler_aggregation_ctrl.value())
 
+
+        #CFAR
+        if what2show == "none":
+            pass
+        else:
+            if method == "CA 2D CFAR":
+                treshold = cfar.cell_average_CFAR_2D(new_data,g_range,g_azi,t_range,t_azi,dim0_i=0,dim1_i=1)
+            elif method == "cMax 2D CFAR":
+                treshold = cfar.cell_max_CFAR_2D(new_data,g_range,g_azi,t_range,t_azi)
+            else:
+                treshold = new_data  
+                print("Unknown CFAR method")
+            
+            if what2show == "treshold":
+                new_data = treshold
+            elif what2show == "targets":
+                targets = new_data
+                targets[new_data<treshold] = 0
+                new_data = targets
+        
+
         # plotting:
         ## upscale:
         N_azi = new_data.shape[1]
         scale_azi = max(1, int(np.ceil(16 / N_azi)))
         new_data = np.repeat(new_data, scale_azi, axis=1)
-        azi_points = self.params["azi_points"]
-        if azi_points.shape[0] < 2:
-            azi_points = np.array([azi_points[0],-azi_points[0]]) 
-        og_azi_angle_diff = azi_points[1]-azi_points[0]
-        azi_points = np.linspace( azi_points[0], azi_points[-1], new_data.shape[1]+1)
-
+        azi_beamVectors = self.params["azi_points"]
+        if azi_beamVectors.shape[0] < 2:
+            azi_beamVectors = np.array([azi_beamVectors[0],-azi_beamVectors[0]]) 
+        azi_diff = azi_beamVectors[1]-azi_beamVectors[0]
+        azi_edges = azi_beamVectors - azi_diff/2 
+        azi_edges = np.append(azi_edges,(azi_edges[-1]+azi_diff))
+        og_azi_angle_diff = azi_diff
+        # azi_points = np.linspace( azi_points[0], azi_points[-1], new_data.shape[1]+1)
+        azi_edges_scaled =  np.linspace( azi_edges[0], azi_edges[-1], new_data.shape[1]+1) # azi_beamVectors
+        
         range0_m = range0 * self.params["range_index2dist"]
         range1_m = range1 * self.params["range_index2dist"]
-        r_edges = np.linspace(range0_m, range1_m, (range1-range0) + 1)
+        r_edges = np.linspace(range0_m, range1_m, (range1-range0) + 1) - self.params["range_index2dist"]/2
         
-
-        R, T = np.meshgrid(r_edges, np.deg2rad(azi_points) , indexing='ij')
+        # PColorMeshItem plots data centers (Z) limited by the edges (X,Y), edges must be one biggur
+        R, T = np.meshgrid(r_edges, np.deg2rad(azi_edges_scaled) , indexing='ij')
         
         # facing UP
         X = R * np.sin(T)
@@ -235,7 +305,12 @@ class PlotWindow(QWidget):
 
         self.mesh.setData(X,Y,Z) 
 
-        self._drawPolarAxes(range0_m,range1_m,azi_points[0], azi_points[-1], 2 * self.params["range_index2dist"],og_azi_angle_diff )
+        self._drawPolarAxes(r_edges[0],r_edges[-1],
+                            phi0= azi_edges[0],
+                            phi1= azi_edges[-1],
+                            dr= self.params["range_index2dist"],
+                            dphi=og_azi_angle_diff,
+                            skip_rangeLabels= 2 )
         
         pass
 

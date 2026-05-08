@@ -49,8 +49,22 @@ def create_DFT_matrix(params: dict) :
     # azi_mesh_range = np.arange(-params["azimuth_range"], params["azimuth_range"]+params["azimuth_step"], params["azimuth_step"])
     # ele_mesh_range  = np.arange(-params["elevation_range"], params["elevation_range"]+params["elevation_step"], params["elevation_step"])
 
-    azi_mesh_range =np.linspace(start= -params["azimuth_range"], stop= params["azimuth_range"],num= params["azi_resolution_N"] )
-    ele_mesh_range = np.linspace(start= -params["elevation_range"], stop= params["elevation_range"],num= params["ele_resolution_N"] )
+    azi_separators = np.linspace(start= -params["azimuth_range"], stop= params["azimuth_range"],num= params["azi_resolution_N"]+1 )
+    ele_separators = np.linspace(start= -params["elevation_range"], stop= params["elevation_range"],num= params["ele_resolution_N"]+1 )
+    
+    azi_mesh_range = azi_separators[:-1] + (params["azimuth_range"]/params["azi_resolution_N"]) 
+    ele_mesh_range = ele_separators[:-1] + (params["elevation_range"]/params["ele_resolution_N"]) 
+    
+
+    print("Vectors for DoA matrix: ")
+    text = ""
+    for azi in azi_mesh_range:
+        text += f"{azi :.1f}, "
+    print(f"Azi: {text}")
+    text = ""
+    for ele in ele_mesh_range:
+        text += f"{ele :.1f}, "
+    print(f"Ele: {text}")
 
     #print(azi_mesh_range[1:]-azi_mesh_range[:-1])
 
@@ -94,11 +108,12 @@ def create_DFT_matrix(params: dict) :
 
     # the use:
     #steering_spectrum_course = np.abs(np.matmul(data['data_bin'][i,:]/self.bm0*self.win_full, self.beam_vector_reduced_flat).reshape([len(ele_mesh_range), len(azi_mesh_range)]))
-    output = {"beam_vector_flat": beam_vector_flat, "azi_mesh_range": azi_mesh_range, "ele_mesh_range": ele_mesh_range, "calib":params["doa_offset_calibration_array"] }
+    output = {"beam_vector_flat": beam_vector_flat, "azi_mesh_range": azi_mesh_range, "ele_mesh_range": ele_mesh_range, "calib":params["doa_offset_calibration_array"],
+              "azi_separators": azi_separators, "ele_separators": ele_separators }
     return output
 
 
-DoA_dict_precalc = create_DFT_matrix(params)
+# DoA_dict_precalc = create_DFT_matrix(params)
 
 
 
