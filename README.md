@@ -2,7 +2,7 @@
 This is WIP, therefore the refinement varies
 
 # Install info
-requirement for your venv are in requirements.txt
+requirement for your venv are in requirements.txt and some sort of openCV idk why it does not show in pip, i believe it will tell you what it needs :)
 - otherwise its just python3
 
 # Run instructions
