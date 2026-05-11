@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
 import processing.DoA
 from FileIO.loadNPZ import loadNPZ
 import processing.HR_process as HR_process
+import processing.resampling as resampling
 
 import visuals.DoA_3Dmesh as DoA_3Dmesh
 # import visuals.PhaseUnWr_plot as PhaseUnWr_plot
@@ -18,6 +19,7 @@ import visuals.DoA_2DAziPlane as DoA_2DAziPlane
 import visuals.DoA_2DAziPlane_tracking as DoA_2DTracking
 
 import visuals.TrackedSignals_plot as TrackingPlot
+import visuals.VitalExtraction_plot as VitalsPlot
 
 import visuals.param_controls as pctrl
 
@@ -63,7 +65,18 @@ loadedData = loadNPZ(filePath)
 
 frames = loadedData["frames"]
 
+HRs = {}
+for key,val  in loadedData.items():
+    if key.startswith("hr_"):
+        HRs[key] = val
+
+
+
 params = HR_process.defaultSliders(frames,params)
+
+
+HRs = resampling.resample_HR_to_frames(HRs,1/params["frame_index2time"])
+
 
 # params["i_Frames_begin"] = 1000
 # params["i_Frames_end"] = 1500
@@ -127,6 +140,11 @@ window_trackPlotting = TrackingPlot.PlotWindow()
 window_trackPlotting.update_newParams(params_2D_DoA)
 window_trackPlotting.assignDataRetrievingFunction(window_tracking.returnTrackedSignals)
 window_trackPlotting.show()
+
+window_VitalsPlotting = VitalsPlot.PlotWindow()
+window_VitalsPlotting.update_newParams_andHR(params_2D_DoA,HRs)
+window_VitalsPlotting.assignDataRetrievingFunction(window_tracking.returnTrackedSignals)
+window_VitalsPlotting.show()
 
 
 exit_btn = QPushButton("Exit Application")

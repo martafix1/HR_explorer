@@ -205,7 +205,7 @@ class ParamControl(QGroupBox):
 
         self.setStyleSheet(_NORMAL_STYLE)
         self.setMaximumHeight(self._MAX_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(4, 14, 4, 4)
@@ -213,6 +213,7 @@ class ParamControl(QGroupBox):
         self._inner_layout = QHBoxLayout()
         self._inner_layout.setSpacing(4)
         outer.addLayout(self._inner_layout)
+
 
         self._build_interior()
         self._refresh_title()
@@ -246,6 +247,7 @@ class ParamControl(QGroupBox):
     def set_warning(self, msg: str) -> None:
         self._state = _STATE_WARNING
         self._state_msg = msg
+
         self._apply_state_style()
         self._refresh_title()
 
@@ -259,6 +261,7 @@ class ParamControl(QGroupBox):
 
         self._set_enabled_recursive(False)
 
+
         self._apply_state_style()
         self._refresh_title()
 
@@ -271,6 +274,7 @@ class ParamControl(QGroupBox):
 
         self.setStyleSheet(_NORMAL_STYLE)
         self._refresh_title()
+
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -714,7 +718,7 @@ class DictTableControl(ParamControl):
         self._table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self._table.setShowGrid(True)
-        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
+        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
         self._table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         if self._orientation == "horizontal":
@@ -723,7 +727,7 @@ class DictTableControl(ParamControl):
             self._table.setVerticalHeaderLabels(["Name", "Value"])
             self._table.verticalHeader().setVisible(True)
             self._table.horizontalHeader().setVisible(False)
-            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
             self._table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
             for col, name in enumerate(self._param_names):
@@ -739,7 +743,7 @@ class DictTableControl(ParamControl):
             self._table.setColumnCount(2)
             self._table.setHorizontalHeaderLabels(["Name", "Value"])
             self._table.horizontalHeader().setVisible(True)
-            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
             self._table.verticalHeader().setVisible(False)
             self._table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
 
@@ -753,6 +757,7 @@ class DictTableControl(ParamControl):
                 self._edits[name] = widget
 
         self._inner_layout.addWidget(self._table)
+        
 
     def _make_edit_handler(self, name: str) -> Callable[[], None]:
         def handler() -> None:
@@ -946,6 +951,391 @@ class DictTableControl(ParamControl):
         self._build_interior()
         self._silent_set(self._values)
         self._emit()
+
+
+# ---------------------------------------------------------------------------
+# DictTableControl_composite
+# ---------------------------------------------------------------------------
+
+class DictTableControl_composite(ParamControl):
+    """
+    Table of named parameters with multiple inputs per parameter.
+    
+    """
+
+    _MAX_HEIGHT = 450
+
+    def __init__(
+        self,
+        name: str,
+        params: dict[str, dict | tuple],
+        headers: list[str] | None = None,
+        orientation: str = "horizontal",
+    ):
+        if orientation not in ("horizontal", "vertical"):
+            raise ValueError("orientation must be 'horizontal' or 'vertical'")
+
+        self._orientation = orientation
+        self._syncing = False
+        # 1. Prepare all the data structures BEFORE building the UI base
+        self._parse_data(params, headers)
+
+        # 2. Call base class init. This creates layouts and calls self._build_interior() safely!
+        super().__init__(name)
+
+        # 3. Now the Qt object exists, so we can set Qt-specific properties
+        if self._orientation == "vertical":
+            self.setMaximumHeight(16777215)
+
+        self._warning_timer = QTimer(self)
+        self._warning_timer.setSingleShot(True)
+        self._warning_timer.timeout.connect(self._clear_warning_state)
+        
+        # 4. Finally, populate the initial UI values
+        self._silent_set(self._values)
+
+    def _parse_data(self, params: dict[str, dict | tuple], headers: list[str] | None) -> None:
+        """Extracts and parses data structures from params. Does NOT touch the UI."""
+        self._param_names = list(params.keys())
+        self._types: dict[str, tuple[type, ...]] = {}
+        self._options: dict[str, tuple[list[str], ...]] = {}
+        self._values: dict[str, tuple] = {}
+        self._edits: dict[str, dict[int, QWidget]] = {}
+        
+        # --- NEW: Bring back tracking for the inline labels ---
+        self._sub_names: dict[str, tuple[str, ...]] = {}
+        self._is_dict_mode: dict[str, bool] = {}
+
+        max_cols = max(len(param_obj) for param_obj in params.values()) if params else 1
+        
+        if headers:
+            self._value_headers = list(headers)
+            if len(self._value_headers) < max_cols:
+                for i in range(len(self._value_headers), max_cols):
+                    self._value_headers.append(f"Val {i+1}")
+        else:
+            self._value_headers = [f"Val {i+1}" for i in range(max_cols)]
+
+        for param_name, spec_tuple in params.items():
+            self._edits[param_name] = {}
+            types, opts, values = [], [], []
+            
+            # --- NEW: Track dict mode and keys for the grey labels ---
+            is_dict = isinstance(spec_tuple, dict)
+            self._is_dict_mode[param_name] = is_dict
+            
+            if is_dict:
+                items = spec_tuple.values()
+                self._sub_names[param_name] = tuple(spec_tuple.keys())
+            else:
+                items = spec_tuple
+                self._sub_names[param_name] = tuple([""] * len(spec_tuple))
+            
+            for value in items:
+                if isinstance(value, list):
+                    types.append(list)
+                    opts.append([str(item) for item in value])
+                    values.append(opts[-1][0] if opts[-1] else "")
+                else:
+                    types.append(type(value))
+                    opts.append([])
+                    values.append(value)
+            
+            self._types[param_name] = tuple(types)
+            self._options[param_name] = tuple(opts)
+            self._values[param_name] = tuple(values)
+
+    def _build_interior(self) -> None:
+        self._table = QTableWidget()
+        self._table.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self._table.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self._table.setShowGrid(True)
+        self._table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored)
+        self._table.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+
+        num_params = len(self._param_names)
+        num_vals = len(self._value_headers)
+
+        if self._orientation == "horizontal":
+            # Dict keys ("line1") are columns
+            self._table.setRowCount(num_vals)
+            self._table.setColumnCount(num_params)
+            self._table.setHorizontalHeaderLabels(self._param_names)
+            self._table.setVerticalHeaderLabels(self._value_headers)
+            self._table.horizontalHeader().setVisible(True)
+            self._table.verticalHeader().setVisible(True)
+            
+            for col, p_name in enumerate(self._param_names):
+                for row in range(num_vals):
+                    if row < len(self._types[p_name]):
+                        widget = self._make_param_widget(p_name, row)
+                        self._table.setCellWidget(row, col, widget)
+                        # self._edits overwrite removed here
+        else:
+            # Dict keys ("line1") are rows
+            self._table.setRowCount(num_params)
+            self._table.setColumnCount(num_vals)
+            self._table.setVerticalHeaderLabels(self._param_names)
+            self._table.setHorizontalHeaderLabels(self._value_headers)
+            self._table.verticalHeader().setVisible(True)
+            self._table.horizontalHeader().setVisible(True)
+
+            for row, p_name in enumerate(self._param_names):
+                for col in range(num_vals):
+                    if col < len(self._types[p_name]):
+                        widget = self._make_param_widget(p_name, col)
+                        self._table.setCellWidget(row, col, widget)
+                        # self._edits overwrite removed here
+
+        self._inner_layout.addWidget(self._table)
+        self._adjust_column_widths()
+
+    def _on_bool_changed(self, param_name: str, val_idx: int, state: int) -> None:
+        if self._syncing: return
+        vals = list(self._values[param_name])
+        vals[val_idx] = (state == Qt.CheckState.Checked.value)
+        self._values[param_name] = tuple(vals)
+        self.clear_state()      # Keep state clean
+        self._refresh_title()
+        self._emit()
+
+    def _on_combo_changed(self, param_name: str, val_idx: int) -> None:
+        if self._syncing: return
+        widget = self._edits[param_name][val_idx]
+        if isinstance(widget, QComboBox):
+            vals = list(self._values[param_name])
+            vals[val_idx] = widget.currentText()
+            self._values[param_name] = tuple(vals)
+            self.clear_state()      # Keep state clean
+            self._refresh_title()
+            self._emit()
+
+    def _make_bool_handler(self, param_name: str, val_idx: int):
+        def handler(state: int) -> None:
+            self._on_bool_changed(param_name, val_idx, state)
+        return handler
+
+    def _make_combo_handler(self, param_name: str, val_idx: int):
+        def handler(_idx: int) -> None:
+            self._on_combo_changed(param_name, val_idx)
+        return handler
+
+    def _make_edit_handler(self, param_name: str, val_idx: int):
+        def handler() -> None:
+            if self._syncing: 
+                return
+            self._on_edit_finished(param_name, val_idx)
+        return handler
+
+    def _adjust_column_widths(self):
+
+        header = self._table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+
+        for col in range(self._table.columnCount()):
+            max_width = 0
+
+            for row in range(self._table.rowCount()):
+                widget = self._table.cellWidget(row, col)
+                if widget:
+                    max_width = max(max_width, widget.sizeHint().width())
+
+            self._table.setColumnWidth(col, max_width + 24)
+
+    def _make_param_widget(self, param_name: str, val_idx: int) -> QWidget:
+        expected_type = self._types[param_name][val_idx]
+        
+        # 1. Create the core input widget
+        if expected_type is bool:
+            input_w = QCheckBox()
+            input_w.stateChanged.connect(self._make_bool_handler(param_name, val_idx))
+        elif expected_type is list:
+            input_w = QComboBox()
+            input_w.addItems(self._options[param_name][val_idx])
+            input_w.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+            input_w.currentIndexChanged.connect(self._make_combo_handler(param_name, val_idx))
+        else:
+            input_w = QLineEdit()
+            # Secure connection via factory method
+            input_w.editingFinished.connect(self._make_edit_handler(param_name, val_idx))
+            # Explicitly force the text box to lose focus when Enter is pressed!
+            input_w.returnPressed.connect(input_w.clearFocus)
+
+        # ALWAYS save the direct input widget to self._edits so parsing/warnings work!
+        self._edits[param_name][val_idx] = input_w
+
+        # 2. Check if we need to wrap it with a grey label (if it came from a dict)
+        sub_name = self._sub_names[param_name][val_idx]
+        if sub_name:
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(4, 0, 4, 0)
+            layout.setSpacing(6)
+            
+            lbl = QLabel(sub_name)
+            lbl.setStyleSheet("color: #888888;") # Greyish text
+            lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+            layout.addWidget(lbl)
+            layout.addWidget(input_w, stretch=1)
+            return container # Return the container to the table
+
+        return input_w # If no sub_name, just return the raw widget
+
+    
+    def _on_edit_finished(self, param_name: str, val_idx: int) -> None:
+        edit_widget = self._edits[param_name][val_idx]
+        if not isinstance(edit_widget, QLineEdit): return
+        
+        raw = edit_widget.text()
+        expected_type = self._types[param_name][val_idx]
+        
+        try:
+            parsed = self._parse_value(raw, expected_type)
+        except ValueError:
+            self._warn_invalid(param_name, val_idx, expected_type)
+            return
+
+        vals = list(self._values[param_name])
+        if parsed == vals[val_idx] and self._state != _STATE_WARNING:
+            return
+
+        vals[val_idx] = parsed
+        self._values[param_name] = tuple(vals)
+        self.clear_state()
+        self._refresh_title()
+        self._emit()
+
+    def _warn_invalid(self, param_name: str, val_idx: int, expected_type: type) -> None:
+        edit_widget = self._edits[param_name][val_idx]
+        if isinstance(edit_widget, QLineEdit):
+            edit_widget.setText(str(self._values[param_name][val_idx]))
+        
+        type_name = "int" if expected_type is int else "float" if expected_type is float else "str"
+        self.set_warning(f"{param_name}: expected {type_name}")
+        self._warning_timer.start(1800)
+
+    def _clear_warning_state(self) -> None:
+        if self._state == _STATE_WARNING:
+            self.clear_state()
+
+    def _silent_set(self, params: dict[str, tuple]) -> None:
+        self._syncing = True
+        for p_name, val_tuple in params.items():
+            if p_name not in self._edits:
+                continue
+            for v_idx, widget in self._edits[p_name].items():
+                if v_idx >= len(val_tuple):
+                    continue
+                    
+                val = val_tuple[v_idx]
+                
+                # Update the widget based on its type
+                if isinstance(widget, QLineEdit):
+                    widget.setText(str(val))
+                elif isinstance(widget, QCheckBox):
+                    # Convert True/False to Qt CheckState
+                    state = Qt.CheckState.Checked if val else Qt.CheckState.Unchecked
+                    widget.setCheckState(state)
+                elif isinstance(widget, QComboBox):
+                    idx = widget.findText(str(val))
+                    if idx >= 0:
+                        widget.setCurrentIndex(idx)
+        self._syncing = False
+        self._refresh_title()
+
+
+    def value(self) -> dict[str, dict | tuple]:
+        res = {}
+        for param_name in self._param_names:
+            if self._is_dict_mode.get(param_name):
+                # Zip the inline labels back with the current values
+                keys = self._sub_names[param_name]
+                vals = self._values[param_name]
+                res[param_name] = dict(zip(keys, vals))
+            else:
+                res[param_name] = self._values[param_name]
+        return res
+
+    def set_value(self, v: dict[str, dict | tuple]) -> None:
+        for param_name, val_obj in v.items():
+            if param_name in self._values:
+                # Extract the raw values whether it's a dict or a tuple
+                if isinstance(val_obj, dict):
+                    self._values[param_name] = tuple(val_obj.values())
+                else:
+                    self._values[param_name] = val_obj
+        self._silent_set(self._values)
+
+    def set_range(self, lo: int, hi: int) -> None:
+        pass
+
+    def _data_type_name(self, expected_type: type) -> str:
+        if expected_type is int:
+            return "int"
+        if expected_type is float:
+            return "float"
+        if expected_type is bool:
+            return "bool"
+        if expected_type is list:
+            return "select"
+        return "text"
+
+    def _parse_value(self, raw: str, expected_type: type) -> int | float | str:
+        if expected_type is int:
+            if raw.strip() == "":
+                raise ValueError("Empty int")
+            return int(raw)
+        if expected_type is float:
+            if raw.strip() == "":
+                raise ValueError("Empty float")
+            return float(raw)
+        return raw
+
+    def _value_str(self) -> str:
+        items = []
+        for param_name, vals in self._values.items():
+            items.append(f"{param_name}={vals}")
+        return ", ".join(items)
+
+    # custom so it does not show the values in title
+    def _refresh_title(self) -> None:
+        title = self._name
+        if self._state == _STATE_WARNING and self._state_msg:
+            title += f"  ⚠ warn: {self._state_msg}"
+        elif self._state == _STATE_ERROR and self._state_msg:
+            title += f"  ⛒ err: {self._state_msg}"
+        self.setTitle(title)
+
+
+    def set_newParams(self, params: dict[str, dict | tuple], headers: list[str] | None = None, silent: bool = False) -> None:
+        """Replace the entire parameter set with a new dict, rebuilding the table."""
+        self._syncing = True
+        try:
+            # Update underlying data
+            self._parse_data(params, headers)
+
+            if hasattr(self, "_table"):
+                self._inner_layout.removeWidget(self._table)
+                self._table.setParent(None)
+                self._table.deleteLater()
+
+            # Rebuild UI
+            self._build_interior()
+            self._silent_set(self._values)
+
+        finally:
+            self._syncing = False
+
+        if not silent:
+            self._emit()
+
+
+
+# ---------------------------------------------------------------------------
+# ComboControl
 # ---------------------------------------------------------------------------
 
 class ComboControl(ParamControl):
@@ -1102,6 +1492,7 @@ if __name__ == "__main__":
         wave_ctrl:    ComboControl
         flags_ctrl:   ChecksetControl
         param_table_ctrl: DictTableControl
+        composite_ctrl: DictTableControl_composite
         reset_ctrl:   ButtonControl
 
         def __init__(self):
@@ -1173,11 +1564,24 @@ if __name__ == "__main__":
             self.reset_ctrl = ButtonControl("Actions", button_label="Reset all")
             self.reset_ctrl._btn.clicked.connect(self._reset_all)
 
+            # row 3 — composite control with multiple inputs per param
+            self.composite_ctrl = DictTableControl_composite(
+                "Multi-input params",
+                params={
+                    "Config1": {"A": 0.5, "B": True, "C": ["1","2","3"]},
+                    "Config2": {"D": 22, "E": 33, "F": ["1","2","3"]},
+                    "Config3": ("text","indeed"),
+                },
+                headers=["Parameter", "Value1", "Value2", "Value3"],
+                orientation="vertical",
+            )
+
             panel.add(self.flags_ctrl, row=2, col=0, col_span=2)
             panel.add(self.reset_ctrl, row=2, col=2)
             panel.add(self.param_table_ctrl, row=0, col=3, row_span=3)
+            panel.add(self.composite_ctrl, row=3, col=0, col_span=4)
 
-            ctrl_widget.setMaximumHeight(320)
+            ctrl_widget.setMaximumHeight(520)
 
             # ── plot ───────────────────────────────────────────────────────
             plot_widget = QWidget()
@@ -1234,7 +1638,8 @@ if __name__ == "__main__":
             y = y * scale + offset
 
             self._curve.setData(x_plot, y)
-            self._pw.setTitle(f"{label}  {self.param_table_ctrl.value_tuple()}")
+            composite_val = self.composite_ctrl.value()
+            self._pw.setTitle(f"{label}  Multi={composite_val}")
 
             # show Δ on the amp slider as a demo
             self.amp_ctrl.set_delta(float(amp))
@@ -1252,6 +1657,13 @@ if __name__ == "__main__":
                 "Enabled": False,
                 "Mode": "auto",
             })
+            self.composite_ctrl.set_value({
+                "Config1": {"A": 0.5, "B": True, "C": ["1","2","3"]},
+                "Config2": {"D": 22, "E": 33, "F": ["1","2","3"]},
+                "Config3": ("text","indeed"),
+            })
+
+
             self.on_change()
 
     window = DemoWindow()
