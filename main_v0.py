@@ -55,6 +55,13 @@ filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_2
 # 21 unR_meas_21_michalauto_radarvodorovne_stani_24-04-2026_14-32-50.npz
 # 22 unR_meas_22_michalauto_radarvodorovne_jizda_rucedolekdyztoslo_24-04-2026_14-39-26.npz
 
+### 40 Hz
+filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_25_martinesn_40hz_zkouskabezbr_stani_07-05-2026_16-52-27.npz" #track 47 in default setting seems viable
+params["frame_index2time"] = 1/40
+## actually likely 20Hz
+# filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_26_martinesn_40hz_again_standing_07-05-2026_17-27-52.npz" #track 47 in default setting seems viable
+# params["frame_index2time"] = 1/20
+
 # filePath = "data/unR_meas_noHR_32_rdr227_humancenter_06-03-2026_14-30-14.npz" 
 # filePath = "data/unR_meas_noHR_33_rdr227_humancenterlowsitting_06-03-2026_14-33-03.npz"
 

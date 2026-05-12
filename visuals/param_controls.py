@@ -1383,6 +1383,19 @@ class ComboControl(ParamControl):
 
     def _value_str(self) -> str:
         return self.value()
+    
+    def update_options(self,options):
+        self._syncing = True
+        self._combo.blockSignals(True)
+
+        self._options = list(options)
+
+        self._combo.clear()
+        self._combo.addItems(self._options)
+        self._combo.blockSignals(False)
+        self._syncing = False
+
+        self._refresh_title()
 
 
 # ---------------------------------------------------------------------------

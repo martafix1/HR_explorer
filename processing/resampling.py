@@ -34,7 +34,7 @@ def resample_HR_to_frames(HRs : dict, fs = 20):
                     "delays_ms": HR_dict[delay_key],
                 }
 
-    print(pairs)
+    # print(pairs)
 
     pairs_resampled = {}
 

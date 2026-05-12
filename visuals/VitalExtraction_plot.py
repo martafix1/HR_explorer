@@ -12,6 +12,7 @@ from typing import Callable, Any
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import visuals.param_controls as pctrl
+import visuals.SpectraInspector as SpectraInspector
 import processing.slidingFFT as slidingFFT
 
 def phaseUnwrapping(data):
@@ -82,6 +83,10 @@ class PlotWindow(QWidget):
         self.export_btn_ctrl = pctrl.ButtonControl("Export", button_label="Export CSV")
         self.export_btn_ctrl._btn.clicked.connect(self.exportData)
         ctrl_panel.add(self.export_btn_ctrl,row=1,col=1)
+
+        self.spectra_btn_ctrl = pctrl.ButtonControl("Spectra", button_label="Inspect spectra")
+        self.spectra_btn_ctrl._btn.clicked.connect(self.openSpectraInspector)
+        ctrl_panel.add(self.spectra_btn_ctrl,row=4,col=3)
         
         self.plot_support_ctrl = pctrl.ChecksetControl("Plot support",labels=["Show points", "Show supports"], defaults=[False, False])
         ctrl_panel.add(self.plot_support_ctrl,row=1,col=2)
@@ -174,6 +179,8 @@ class PlotWindow(QWidget):
         self.cmap = plt.get_cmap('tab10')
         self._update_second_plot_controls_state()
 
+        self.spectraInspector = None
+
     def exportData(self):
         if not hasattr(self, "data2export"):
             return
@@ -254,6 +261,48 @@ class PlotWindow(QWidget):
 
         self._update_second_plot_controls_state()
 
+    def _enabled_track_ids_for_inspector(self) -> list[int]:
+        if not hasattr(self, "tracking_data"):
+            return []
+
+        selected = self.track_selection_ctrl.value()
+        show_mode = selected.get("Show", "Select")
+        if show_mode == "All":
+            return sorted(int(key) for key in self.tracking_data.keys())
+
+        ids: list[int] = []
+        for key, value in selected.items():
+            if key == "Show":
+                continue
+            if value:
+                ids.append(int(key))
+        return ids or sorted(int(key) for key in self.tracking_data.keys())
+
+    def openSpectraInspector(self):
+        if not hasattr(self, "tracking_data") or not self.tracking_data:
+            self.spectra_btn_ctrl.set_warning("Load tracking data first")
+            return
+        if not hasattr(self, "params"):
+            self.spectra_btn_ctrl.set_warning("No params available")
+            return
+        
+        self.spectra_btn_ctrl.clear_state()
+
+        if self.spectraInspector is None:
+            self.spectraInspector = SpectraInspector.SpectraInspectorWindow()
+
+        self.spectraInspector.update_context(
+            tracking_data=self.tracking_data,
+            params=self.params,
+            HRs=getattr(self, "HRs", {}),
+            vital_processing_values=self.sig_processing1_ctrl.value(),
+            vital_signal_processor=self.signalProcessing,
+            enabled_track_ids=self._enabled_track_ids_for_inspector(),
+        )
+        self.spectraInspector.show()
+        self.spectraInspector.raise_()
+        self.spectraInspector.activateWindow()
+
     def signalProcessing(self,signal: np.ndarray | None = None, 
                           method: str | None = None,
                           m_params: dict  = {}):
@@ -267,10 +316,10 @@ class PlotWindow(QWidget):
                 "inst ampl Hilbert": {},
                 "inst f slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":80,
                                         "fixedFFT_size":200, "freqRangeStart":0.1, "freqRangeStop":2.0,
-                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming"]  },
+                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming","blackman"]  },
                 "inst A slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":80,
                                         "fixedFFT_size":200, "freqRangeStart":0.1, "freqRangeStop":2.0,
-                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming"]  }
+                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming","blackman"]  }
             }
         if method is None or signal is None:# describe avalible methods
             return capabalities
@@ -601,7 +650,7 @@ class PlotWindow(QWidget):
                     rcolor, g, b, acolor = self.cmap(i1 % 10)
                     color = (int(rcolor * 255), int(g * 255), int(b * 255), int(acolor * 255))
                     pen = pg.mkPen(color=color)
-                    name = f"ID:{key_ID_int} {line_key} - {line_vals["Method"]}"
+                    name = f"ID:{key_ID_int} {line_key} - {line_vals['Method']}"
 
                     
                     
@@ -645,7 +694,7 @@ class PlotWindow(QWidget):
                     rcolor, g, b, acolor = self.cmap(i2 % 10)
                     color = (int(rcolor * 255), int(g * 255), int(b * 255), int(acolor * 255))
                     pen = pg.mkPen(color=color)
-                    name = f"ID:{key_ID_int} {line_key} - {line_vals["Method"]}"
+                    name = f"ID:{key_ID_int} {line_key} - {line_vals['Method']}"
 
                     
                     
