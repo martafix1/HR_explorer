@@ -45,6 +45,7 @@ filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_1
 # filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_18_michalauto_jizda_24-04-2026_14-00-40.npz"
 
 filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_21_michalauto_radarvodorovne_stani_24-04-2026_14-32-50.npz"
+filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_22_michalauto_radarvodorovne_jizda_rucedolekdyztoslo_24-04-2026_14-39-26.npz"
 # filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_22_michalauto_radarvodorovne_jizda_rucedolekdyztoslo_24-04-2026_14-39-26.npz"
 # 15 unR_meas_15_michalautoklid_24-04-2026_13-40-12.npz
 # 16 unR_meas_16_michalautoklid_24-04-2026_13-41-17.npz
@@ -55,9 +56,11 @@ filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_2
 # 21 unR_meas_21_michalauto_radarvodorovne_stani_24-04-2026_14-32-50.npz
 # 22 unR_meas_22_michalauto_radarvodorovne_jizda_rucedolekdyztoslo_24-04-2026_14-39-26.npz
 
+# filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_24_martinesn_20hz_zkouskabez_br_standing_07-05-2026_15-43-46.npz"
+
 ### 40 Hz
-filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_25_martinesn_40hz_zkouskabezbr_stani_07-05-2026_16-52-27.npz" #track 47 in default setting seems viable
-params["frame_index2time"] = 1/40
+# filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_25_martinesn_40hz_zkouskabezbr_stani_07-05-2026_16-52-27.npz" #track 47 in default setting seems viable
+# params["frame_index2time"] = 1/40
 ## actually likely 20Hz
 # filePath = "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_26_martinesn_40hz_again_standing_07-05-2026_17-27-52.npz" #track 47 in default setting seems viable
 # params["frame_index2time"] = 1/20
@@ -130,9 +133,9 @@ widow_PhaseUnwr = PhaseUnWr_plot.PlotWindow()
 widow_PhaseUnwr.update_newData(penteract_2D_DoA[:,:,:,:,:],params_2D_DoA)
 widow_PhaseUnwr.show()
 
-# window_STFT = HR_STFT_plot.PlotWindow()
-# window_STFT.update_newData(penteract_2D_DoA[:,0,:,:,:],params_2D_DoA)
-# window_STFT.show()
+window_STFT = HR_STFT_plot.PlotWindow()
+window_STFT.update_newData(penteract_2D_DoA[:,0,:,:,:],params_2D_DoA)
+window_STFT.show()
 
 
 # window_DoA_2DAziPlane = DoA_2DAziPlane.PlotWindow()

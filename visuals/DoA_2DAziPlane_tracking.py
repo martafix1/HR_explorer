@@ -1,4 +1,5 @@
 import sys
+import ast
 import numpy as np
 from PySide6 import QtWidgets, QtGui
 import pyqtgraph as pg
@@ -164,8 +165,9 @@ class PlotWindow(QWidget):
         self.track_labels = []
         self.dispIDs = True
         self.track_death_markers = []
+        self.enforcement_cage_items = []
 
-        # Precompute a palette 
+        # Deterministic colors for enforced letter tracks.
         self.track_color_pool = [
             (255, 80, 80),    # bright red
             (80, 255, 80),    # bright green
@@ -187,9 +189,14 @@ class PlotWindow(QWidget):
             size=10, pen=pg.mkPen('w'), brush=pg.mkBrush('r'), 
             hoverable=True, tip=self._format_track_tooltip
         )
+        self.enforced_track_scatter = pg.ScatterPlotItem(
+            size=13, symbol='s', pen=pg.mkPen('w', width=2), brush=pg.mkBrush('y'),
+            hoverable=True, tip=self._format_track_tooltip
+        )
         # This list will hold the "tails" (history lines)
         self.track_tails = [] 
         self.plot_item.addItem(self.track_scatter)
+        self.plot_item.addItem(self.enforced_track_scatter)
 
         # ── finnish splitter ───────────────────────────────────────────
         splitter.addWidget(ctrl_widget)
@@ -268,6 +275,114 @@ class PlotWindow(QWidget):
             self.plot_item.addItem(label)
             self.PolarAxisItems.append(label)
 
+    def _track_is_enforced(self, track):
+        return bool(track.get("enforced", False)) or str(track.get("status", "")) == "ENFORCED"
+
+    def _enforced_color(self, tid):
+        palette = [
+            (255, 60, 60), (60, 220, 80), (70, 150, 255), (255, 180, 50),
+            (230, 80, 255), (50, 220, 220), (255, 240, 70), (170, 110, 255),
+        ]
+        s = str(tid)
+        if s and s[0].isalpha():
+            idx = ord(s[0].upper()) - ord('A')
+        else:
+            idx = sum(ord(ch) for ch in s)
+        return palette[idx % len(palette)]
+
+    def _track_color(self, tid, enforced=False):
+        if enforced:
+            return self._enforced_color(tid)
+        return self.track_color_map.get(tid, (255, 255, 255))
+
+    def _track_xy(self, track, d_azi):
+        if "centroid" in track:
+            r_phys = (track["centroid"][0] + self.trackingRangeOffset) * self.params["range_index2dist"]
+            azi_angle = track["centroid"][1] * d_azi + self.params["azi_points"][0]
+        else:
+            range_abs = track['r_bin'] + self.trackingRangeOffset
+            r_phys = range_abs * self.params["range_index2dist"]
+            azi_angle = self.params["azi_points"][track['azi_bin']]
+        x = r_phys * np.sin(np.deg2rad(azi_angle))
+        y = r_phys * np.cos(np.deg2rad(azi_angle))
+        return x, y
+
+    def _get_enforcement_cages(self):
+        cages = self.params.get("enforcement_cages", self.params.get("Enforced tracks", [])) or []
+        if isinstance(cages, str):
+            try:
+                cages = ast.literal_eval(cages)
+            except (ValueError, SyntaxError):
+                return []
+        if isinstance(cages, dict):
+            cages = [cages]
+        return cages if isinstance(cages, list) else []
+
+    def _cage_bounds(self, cage):
+        def first(*keys, default=None):
+            for key in keys:
+                if key in cage:
+                    return cage[key]
+            return default
+        r0 = int(first("r_begin", "range_begin", "r0", default=0))
+        r1 = int(first("r_end", "range_end", "r1", default=r0 + 1))
+        a0 = int(first("azi_begin", "azimuth_begin", "a_begin", "azi0", "a0", default=0))
+        a1 = int(first("azi_end", "azimuth_end", "a_end", "azi1", "a1", default=a0 + 1))
+        return r0, r1, a0, a1
+
+    def _polar_point(self, range_bin_edge, azi_edge_deg):
+        r = range_bin_edge * self.params["range_index2dist"] - self.params["range_index2dist"] / 2
+        x = r * np.sin(np.deg2rad(azi_edge_deg))
+        y = r * np.cos(np.deg2rad(azi_edge_deg))
+        return x, y
+
+    def _draw_enforcement_cages(self):
+        for item in self.enforcement_cage_items:
+            self.plot_item.removeItem(item)
+        self.enforcement_cage_items = []
+
+        cages = self._get_enforcement_cages()
+        if not cages or "azi_points" not in self.params or len(self.params["azi_points"]) == 0:
+            return
+
+        azi_points = self.params["azi_points"]
+        if len(azi_points) < 2:
+            d_azi = 1.0
+        else:
+            d_azi = azi_points[1] - azi_points[0]
+
+        for idx, cage in enumerate(cages):
+            tid = cage.get("id", chr(ord('A') + idx))
+            color = self._enforced_color(tid)
+            r0, r1, a0, a1 = self._cage_bounds(cage)
+            a0_edge = azi_points[0] + a0 * d_azi - d_azi / 2
+            a1_edge = azi_points[0] + a1 * d_azi - d_azi / 2
+
+            # Cage border as four polar-cell-edge curves/lines.
+            border_points = [
+                self._polar_point(r0, a0_edge),
+                self._polar_point(r1, a0_edge),
+                self._polar_point(r1, a1_edge),
+                self._polar_point(r0, a1_edge),
+                self._polar_point(r0, a0_edge),
+            ]
+            xs, ys = zip(*border_points)
+            border = pg.PlotDataItem(xs, ys, pen=pg.mkPen((*color, 230), width=2))
+            self.plot_item.addItem(border)
+            self.enforcement_cage_items.append(border)
+
+            # Tiny outside hatch/skirt ticks. Not CAD-perfect, but visually clear and cheap.
+            hatch_segments = []
+            for rr in np.linspace(r0, r1, max(2, r1 - r0 + 1)):
+                for aa_edge, sign in ((a0_edge, -1), (a1_edge, 1)):
+                    x0, y0 = self._polar_point(rr, aa_edge)
+                    x1, y1 = self._polar_point(rr + 0.35, aa_edge + sign * d_azi * 0.18)
+                    hatch_segments.append(((x0, y0), (x1, y1)))
+            for (x0, y0), (x1, y1) in hatch_segments:
+                tick = pg.PlotDataItem([x0, x1], [y0, y1], pen=pg.mkPen((*color, 140), width=1))
+                self.plot_item.addItem(tick)
+                self.enforcement_cage_items.append(tick)
+
     def _format_track_tooltip(self,x, y, data):
             # 'data' will now be your entire track dictionary
             if isinstance(data, dict):
@@ -283,6 +398,7 @@ class PlotWindow(QWidget):
         if not hasattr(self, 'tracking_history'):
             return
         historyDepth = self.tracking_table_ctrl.value()["show history"]
+
         # --- A. Clear previous visuals ---
         for tail in self.track_tails:
             self.plot_item.removeItem(tail)
@@ -296,167 +412,137 @@ class PlotWindow(QWidget):
             self.plot_item.removeItem(marker)
         self.track_death_markers = []
 
+        self._draw_enforcement_cages()
+
         # --- B. Current frame ---
         current_rel_frame = self.frames_ctrl.value() - self.frames_ctrl._min
+        if current_rel_frame < 0 or current_rel_frame >= len(self.tracking_history):
+            return
 
-        range0,range1 = self.range_ctrl.value()
+        range0, range1 = self.range_ctrl.value()
 
         # --- C. Build track histories ---
         track_paths = {}
+        track_enforced = {}
         current_ids = set()
 
-        d_azi = self.params["azi_points"][1]-self.params["azi_points"][0] # for angle calcs
+        if len(self.params["azi_points"]) > 1:
+            d_azi = self.params["azi_points"][1] - self.params["azi_points"][0]
+        else:
+            d_azi = 1.0
 
         for frame_idx in range(max(0, current_rel_frame - historyDepth), current_rel_frame + 1):
             frame_data = self.tracking_history[frame_idx]
-
             for t in frame_data:
-                range_abs = t['r_bin'] + self.trackingRangeOffset 
-                # if range_abs > range1 or range_abs < range0:
-                #     continue
-
                 tid = t['id']
+                enforced = self._track_is_enforced(t)
                 current_ids.add(tid)
-                if "centroid" in t: #supports exact position
-                    r_phys = (t["centroid"][0] + self.trackingRangeOffset  ) * self.params["range_index2dist"]
-                    
-                    azi_angle = t["centroid"][1] * d_azi + self.params["azi_points"][0]
-                else: # grid only position    
-                    r_phys = (range_abs ) * self.params["range_index2dist"]
-                    azi_angle = self.params["azi_points"][t['azi_bin']]
+                track_enforced[tid] = enforced
+                track_paths.setdefault(tid, []).append(self._track_xy(t, d_azi))
 
-                x = r_phys * np.sin(np.deg2rad(azi_angle))
-                y = r_phys * np.cos(np.deg2rad(azi_angle))
-
-                track_paths.setdefault(tid, []).append((x, y))
-
-        # --- D. Maintain color pool (assign + release) ---
-        # release colors of dead tracks
-        dead_ids = self.track_active_ids - current_ids
+        # --- D. Maintain normal-track color pool. Enforced colors are deterministic. ---
+        normal_current_ids = {tid for tid in current_ids if not track_enforced.get(tid, False)}
+        dead_ids = self.track_active_ids - normal_current_ids
         for tid in dead_ids:
             if tid in self.track_color_map:
                 self.track_color_pool.append(self.track_color_map.pop(tid))
 
-        # assign colors to new tracks
-        new_ids = current_ids - self.track_active_ids
+        new_ids = normal_current_ids - self.track_active_ids
         for tid in new_ids:
             if self.track_color_pool:
                 self.track_color_map[tid] = self.track_color_pool.pop(0)
             else:
-                # fallback (shouldn't happen with ≤10 tracks)
-                r = random.randint(100, 255)
-                g = random.randint(100, 255)
-                b = random.randint(100, 255)
-                self.track_color_map[tid] = (r, g, b)
+                self.track_color_map[tid] = (
+                    random.randint(100, 255),
+                    random.randint(100, 255),
+                    random.randint(100, 255),
+                )
+        self.track_active_ids = normal_current_ids.copy()
 
-        self.track_active_ids = current_ids.copy()
-
-        # --- E. Detect deaths ---
+        # --- E. Detect deaths. Enforced tracks don't die. ---
         death_positions = []
-
         for frame_idx in range(max(0, current_rel_frame - historyDepth), current_rel_frame):
-            ids_now = {t['id'] for t in self.tracking_history[frame_idx]}
-            ids_next = {t['id'] for t in self.tracking_history[frame_idx + 1]}
-
+            ids_now = {t['id'] for t in self.tracking_history[frame_idx] if not self._track_is_enforced(t)}
+            ids_next = {t['id'] for t in self.tracking_history[frame_idx + 1] if not self._track_is_enforced(t)}
             died = ids_now - ids_next
 
             for t in self.tracking_history[frame_idx]:
                 if t['id'] in died:
-                    range_abs = t['r_bin'] + self.trackingRangeOffset 
+                    range_abs = t['r_bin'] + self.trackingRangeOffset
                     if range_abs > range1 or range_abs < range0:
                         continue
-                    
-                    if "centroid" in t: #supports exact position
-                        r_phys = (t["centroid"][0] + self.trackingRangeOffset  ) * self.params["range_index2dist"]
-                        
-                        azi_angle = t["centroid"][1] * d_azi + self.params["azi_points"][0]
-                    else: # grid only position    
-                        r_phys = (range_abs ) * self.params["range_index2dist"]
-                        azi_angle = self.params["azi_points"][t['azi_bin']]
-
-                    x = r_phys * np.sin(np.deg2rad(azi_angle))
-                    y = r_phys * np.cos(np.deg2rad(azi_angle))
-
+                    x, y = self._track_xy(t, d_azi)
                     death_positions.append((t['id'], x, y))
 
         # --- F. Draw tails with fading ---
-        for tid, path in track_paths.items():
-            if len(path) < 2:
+        for tid, path_points in track_paths.items():
+            if len(path_points) < 2:
                 continue
+            enforced = track_enforced.get(tid, False)
+            color = self._track_color(tid, enforced=enforced)
+            width = 3 if enforced else 2
 
-            color = self.track_color_map.get(tid, (255, 255, 255))
-
-            # draw segments with fading alpha
-            for i in range(len(path) - 1):
-                (x1, y1), (x2, y2) = path[i], path[i + 1]
-
-                alpha = int(255 * (i + 1) / len(path))  # fade in toward present
-
+            for i in range(len(path_points) - 1):
+                (x1, y1), (x2, y2) = path_points[i], path_points[i + 1]
+                alpha = int(255 * (i + 1) / len(path_points))
                 seg = pg.PlotDataItem(
                     x=[x1, x2],
                     y=[y1, y2],
-                    pen=pg.mkPen(color=(*color, alpha), width=2)
+                    pen=pg.mkPen(color=(*color, alpha), width=width)
                 )
-
                 self.plot_item.addItem(seg)
                 self.track_tails.append(seg)
 
-            # --- Label ---
             if self.dispIDs:
-                x_last, y_last = path[-1]
-
-                label = pg.TextItem(
-                    text=str(tid),
-                    color=color,
-                    anchor=(0, 1)
-                )
+                x_last, y_last = path_points[-1]
+                label = pg.TextItem(text=str(tid), color=color, anchor=(0, 1))
                 label.setPos(x_last, y_last)
-
                 self.plot_item.addItem(label)
                 self.track_labels.append(label)
 
         # --- G. Death markers ---
         for tid, x, y in death_positions:
             color = self.track_color_map.get(tid, (0, 255, 0))
-
-            marker = pg.ScatterPlotItem(
-                x=[x],
-                y=[y],
-                symbol='x',
-                size=12,
-                pen=pg.mkPen(color, width=2)
-            )
-
+            marker = pg.ScatterPlotItem(x=[x], y=[y], symbol='x', size=12, pen=pg.mkPen(color, width=2))
             self.plot_item.addItem(marker)
             self.track_death_markers.append(marker)
 
-        # --- H. Heads ---
+        # --- H. Heads. Enforced tracks get squares and are drawn last/on top. ---
         current_frame_data = self.tracking_history[current_rel_frame]
-
-        points = []
-        brushes = []
+        normal_points, normal_brushes = [], []
+        enforced_points, enforced_brushes = [], []
+        occupied = {}
 
         for t in current_frame_data:
             tid = t['id']
-            range_abs = t['r_bin'] + self.trackingRangeOffset 
+            range_abs = t['r_bin'] + self.trackingRangeOffset
             if range_abs > range1 or range_abs < range0:
                 continue
-            color = self.track_color_map.get(tid, (255, 255, 255))
 
-            if "centroid" in t: #supports exact position
-                r_phys = (t["centroid"][0] + self.trackingRangeOffset  ) * self.params["range_index2dist"]
-                azi_angle = t["centroid"][1] * d_azi + self.params["azi_points"][0]
-            else: # grid only position    
-                r_phys = (range_abs ) * self.params["range_index2dist"]
-                azi_angle = self.params["azi_points"][t['azi_bin']]
+            enforced = self._track_is_enforced(t)
+            color = self._track_color(tid, enforced=enforced)
+            x, y = self._track_xy(t, d_azi)
 
-            x = r_phys * np.sin(np.deg2rad(azi_angle))
-            y = r_phys * np.cos(np.deg2rad(azi_angle))
+            # Visualization-only jitter when markers share a cell.
+            cell = (int(t['r_bin']), int(t['azi_bin']))
+            collision_idx = occupied.get(cell, 0)
+            occupied[cell] = collision_idx + 1
+            if collision_idx:
+                jitter = 0.16 * self.params["range_index2dist"] * collision_idx
+                angle = collision_idx * 2.399963  # golden-angle-ish, deterministic
+                x += jitter * np.cos(angle)
+                y += jitter * np.sin(angle)
 
-            points.append({'pos': (x, y), 'data': t})
-            brushes.append(pg.mkBrush(color))
+            point = {'pos': (x, y), 'data': t}
+            if enforced:
+                enforced_points.append(point)
+                enforced_brushes.append(pg.mkBrush(color))
+            else:
+                normal_points.append(point)
+                normal_brushes.append(pg.mkBrush(color))
 
-        self.track_scatter.setData(points, brush=brushes)
+        self.track_scatter.setData(normal_points, brush=normal_brushes)
+        self.enforced_track_scatter.setData(enforced_points, brush=enforced_brushes)
 
     def runTrackingLogic_placeholder(self):
         # A. Determine number of frames from slider
@@ -513,7 +599,9 @@ class PlotWindow(QWidget):
         # self.tracking_table_ctrl.value()
         self.tracking_history, self.track_signals = tracking.track_allData(penteract= self.penteract[:,:,range0:range1,:,:],
                                                        cfar_params=self.cfar_table_ctrl.value(),
-                                                       tracking_params=self.tracking_table_ctrl.value())
+                                                       tracking_params=self.tracking_table_ctrl.value(),
+                                                       enforcement_cages=self._get_enforcement_cages(),
+                                                       range_offset=range0)
         self._update_track_overlay()
 
     def returnTrackedSignals(self):
@@ -608,6 +696,8 @@ class PlotWindow(QWidget):
     def update_newData(self,data,params):
         self.penteract = data
         self.params = params
+        if "_window_title" in params:
+            self.setWindowTitle(params["_window_title"])
 
         
         self.frames_ctrl.set_range(params[ "i_Frames_begin"], params["i_Frames_end"]-1)

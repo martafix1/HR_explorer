@@ -230,7 +230,9 @@ class PlotWindow(QWidget):
         self.track_selection_ctrl.set_newParams(tracks_dict)
         
         ## signals in tracks - assume all tracks have the same sigs
-        signals = list(self.tracking_data[0].keys()) 
+        first_key = next(iter(self.tracking_data))
+        signals = list(self.tracking_data[first_key].keys())
+
 
         if "frames" in signals:
             signals.remove("frames")
@@ -261,22 +263,22 @@ class PlotWindow(QWidget):
 
         self._update_second_plot_controls_state()
 
-    def _enabled_track_ids_for_inspector(self) -> list[int]:
+    def _enabled_track_ids_for_inspector(self) -> list[str]:
         if not hasattr(self, "tracking_data"):
             return []
 
         selected = self.track_selection_ctrl.value()
         show_mode = selected.get("Show", "Select")
         if show_mode == "All":
-            return sorted(int(key) for key in self.tracking_data.keys())
+            return sorted(str(key) for key in self.tracking_data.keys())
 
-        ids: list[int] = []
+        ids: list[str] = []
         for key, value in selected.items():
             if key == "Show":
                 continue
             if value:
-                ids.append(int(key))
-        return ids or sorted(int(key) for key in self.tracking_data.keys())
+                ids.append(str(key))
+        return ids or sorted(str(key) for key in self.tracking_data.keys())
 
     def openSpectraInspector(self):
         if not hasattr(self, "tracking_data") or not self.tracking_data:
@@ -605,11 +607,11 @@ class PlotWindow(QWidget):
         for key_ID, value_ID in track_selection.items():
             if key_ID == "Show":
                 continue
-            key_ID_int = int(key_ID)
+            track_id = key_ID
             if value_ID is False:
                 continue
             else:
-                IDs_to_process.append(int(key_ID))
+                IDs_to_process.append(track_id)
 
         signalDict = {}
         for line_key, line_vals in sig_processing_vals.items():
@@ -617,8 +619,8 @@ class PlotWindow(QWidget):
                     continue
             
             lineSignals = {}
-            for key_ID_int in IDs_to_process:
-                frames = self.tracking_data[key_ID_int]["frames"]
+            for track_id in IDs_to_process:
+                frames = self.tracking_data[track_id]["frames"]
                 frames_mask = (frames >= frame_begin) & (frames <= frame_end)
                 frames_visible = frames[frames_mask]
                 if len(frames_visible) == 0:
@@ -626,10 +628,10 @@ class PlotWindow(QWidget):
 
                 signal_of_choice = line_vals["Input"]
                 if signal_of_choice == "Ph. unwrap":
-                    signal = self.tracking_data[key_ID_int]["phase_unwrapped"]
+                    signal = self.tracking_data[track_id]["phase_unwrapped"]
                     signal_visible = signal[frames_mask]
                 elif signal_of_choice in signalDict:
-                    signal_visible = signalDict[signal_of_choice].get(key_ID_int, np.array([]))
+                    signal_visible = signalDict[signal_of_choice].get(track_id, np.array([]))
                 else:
                     signal_visible = np.array([])
                     print(f"Invalid input {signal_of_choice} for {line_key}")
@@ -640,7 +642,7 @@ class PlotWindow(QWidget):
                     continue
 
                 signal_visible = self.signalProcessing(signal=signal_visible,method=line_vals["Method"],m_params=line_vals)
-                lineSignals[key_ID_int] = signal_visible
+                lineSignals[track_id] = signal_visible
                 
 
                 if line_vals["Plot 1"] == False: # do not proceed to plotting if not to plot
@@ -650,7 +652,7 @@ class PlotWindow(QWidget):
                     rcolor, g, b, acolor = self.cmap(i1 % 10)
                     color = (int(rcolor * 255), int(g * 255), int(b * 255), int(acolor * 255))
                     pen = pg.mkPen(color=color)
-                    name = f"ID:{key_ID_int} {line_key} - {line_vals['Method']}"
+                    name = f"ID:{track_id} {line_key} - {line_vals['Method']}"
 
                     
                     
@@ -694,7 +696,7 @@ class PlotWindow(QWidget):
                     rcolor, g, b, acolor = self.cmap(i2 % 10)
                     color = (int(rcolor * 255), int(g * 255), int(b * 255), int(acolor * 255))
                     pen = pg.mkPen(color=color)
-                    name = f"ID:{key_ID_int} {line_key} - {line_vals['Method']}"
+                    name = f"ID:{track_id} {line_key} - {line_vals['Method']}"
 
                     
                     

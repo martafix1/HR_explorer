@@ -1,5 +1,6 @@
 import numpy as np
 import sys, os, time
+import ast
 import copy
 import scipy
 
@@ -140,6 +141,146 @@ def extract_track_signals(frame_data, detection, merge_bins=True):
     return pow_all, pow_high_dop, complex_d0
 
 
+def _as_track_id(value):
+    """Track IDs are strings now; enforced tracks use letters, normal tracks use '0', '1', ..."""
+    return str(value)
+
+
+def _enforced_track_letter(index: int) -> str:
+    """A, B, ... Z, AA, AB, ..."""
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    out = ""
+    index += 1
+    while index:
+        index, rem = divmod(index - 1, 26)
+        out = letters[rem] + out
+    return out
+
+
+def _get_cage_bounds(cage, range_offset=0, n_range=None, n_azi=None):
+    """
+    Accepts either:
+        {"id":"A", "r_begin":20, "r_end":35, "azi_begin":2, "azi_end":5}
+    or aliases:
+        r0/r1, range_begin/range_end, a0/a1, azi0/azi1
+
+    Range values are assumed absolute in the full penteract; range_offset converts
+    them to the currently sliced tracking penteract.
+    End indices are Python-style exclusive. If you think in inclusive bins, add +1.
+    """
+    def first(*keys, default=None):
+        for key in keys:
+            if key in cage:
+                return cage[key]
+        return default
+
+    r0 = int(first("r_begin", "range_begin", "r0", default=0)) - int(range_offset)
+    r1 = int(first("r_end", "range_end", "r1", default=(n_range if n_range is not None else r0 + 1))) - int(range_offset)
+    a0 = int(first("azi_begin", "azimuth_begin", "a_begin", "azi0", "a0", default=0))
+    a1 = int(first("azi_end", "azimuth_end", "a_end", "azi1", "a1", default=(n_azi if n_azi is not None else a0 + 1)))
+
+    if n_range is not None:
+        r0 = max(0, min(n_range, r0))
+        r1 = max(0, min(n_range, r1))
+    if n_azi is not None:
+        a0 = max(0, min(n_azi, a0))
+        a1 = max(0, min(n_azi, a1))
+    return r0, r1, a0, a1
+
+
+def _make_detection_from_cage(frame_doppler_sum, r0, r1, a0, a1):
+    """Argmax inside cage, with points sorted by amplitude for signal extraction."""
+    cage_amp = frame_doppler_sum[r0:r1, a0:a1]
+    if cage_amp.size == 0:
+        return None
+
+    flat_order = np.argsort(cage_amp.reshape(-1))[::-1]
+    points = []
+    amps = []
+    for flat_idx in flat_order:
+        rr, aa = np.unravel_index(flat_idx, cage_amp.shape)
+        points.append((int(r0 + rr), int(a0 + aa)))
+        amps.append(float(cage_amp[rr, aa]))
+
+    peak = np.array(points[0], dtype=float)
+    return {
+        "centroid": peak,
+        "points": np.array(points, dtype=int),
+        "amplitudes": np.array(amps, dtype=float),
+        "amplitude_sum": float(np.sum(amps)),
+    }
+
+
+def _normalize_enforcement_cages(enforcement_cages):
+    if not enforcement_cages:
+        return []
+    if isinstance(enforcement_cages, str):
+        try:
+            enforcement_cages = ast.literal_eval(enforcement_cages)
+        except (ValueError, SyntaxError):
+            return []
+    if isinstance(enforcement_cages, dict):
+        return [enforcement_cages]
+    if isinstance(enforcement_cages, list):
+        return enforcement_cages
+    return []
+
+
+def track_enforcedData(penteract, enforcement_cages, tracking_params, range_offset=0):
+    """
+    Build undying cage-constrained tracks. One track per cage per frame.
+
+    penteract shape: (Frames, Doppler, Range, Ele, Azi). Only Ele=0 is used,
+    matching the normal 2D tracker.
+    """
+    enforcement_cages = _normalize_enforcement_cages(enforcement_cages)
+    if not enforcement_cages:
+        return [[] for _ in range(penteract.shape[0])], {}
+
+    tracking_history = []
+    track_signal_logs = {}
+    merge_bins = tracking_params.get("Sig. extr: merge bins", True)
+
+    for frame_idx, frame in enumerate(penteract[:, :, :, 0, :]):
+        frame_doppler_sum = np.abs(np.sum(frame, axis=0))
+        frame_tracks = []
+
+        for cage_idx, cage in enumerate(enforcement_cages):
+            tid = _as_track_id(cage.get("id", _enforced_track_letter(cage_idx)))
+            r0, r1, a0, a1 = _get_cage_bounds(
+                cage,
+                range_offset=range_offset,
+                n_range=frame_doppler_sum.shape[0],
+                n_azi=frame_doppler_sum.shape[1],
+            )
+            detection = _make_detection_from_cage(frame_doppler_sum, r0, r1, a0, a1)
+            if detection is None:
+                continue
+
+            pow_all, pow_high, comp_d0 = extract_track_signals(frame, detection, merge_bins=merge_bins)
+            if tid not in track_signal_logs:
+                track_signal_logs[tid] = {"frames": [], "pow_all": [], "pow_high": [], "comp_d0": []}
+            track_signal_logs[tid]["frames"].append(frame_idx)
+            track_signal_logs[tid]["pow_all"].append(pow_all)
+            track_signal_logs[tid]["pow_high"].append(pow_high)
+            track_signal_logs[tid]["comp_d0"].append(comp_d0)
+
+            frame_tracks.append({
+                "id": tid,
+                "r_bin": int(detection["centroid"][0]),
+                "azi_bin": int(detection["centroid"][1]),
+                "centroid": detection["centroid"],
+                "status": "ENFORCED",
+                "alive": frame_idx + 1,
+                "enforced": True,
+                "cage": dict(cage),
+            })
+
+        tracking_history.append(frame_tracks)
+
+    return tracking_history, finalize_signal_logs(track_signal_logs, decay_alpha=0.15)
+
+
 def finalize_signal_logs(track_logs, decay_alpha=0.2):
     """
     Converts lists to numpy arrays, applies phase unwrapping, 
@@ -205,10 +346,17 @@ def finalize_signal_logs(track_logs, decay_alpha=0.2):
 # }
 
 
-def track_allData(penteract, cfar_params, tracking_params):
+def track_allData(penteract, cfar_params, tracking_params, enforcement_cages=None, range_offset=0):
     ID = 0
     tracking_history = []
     track_signal_logs = {}
+
+    enforced_history, enforced_signals = track_enforcedData(
+        penteract,
+        enforcement_cages or [],
+        tracking_params,
+        range_offset=range_offset,
+    )
 
     frame_idx = 0
     def log_track_data(t_id, det_idx):
@@ -334,14 +482,15 @@ def track_allData(penteract, cfar_params, tracking_params):
         if len(unmatched_detections) >0:
             for d_idx in unmatched_detections:
                 track = {
-                "id": ID,        
+                "id": _as_track_id(ID),        
                 "r_bin": int(detections[d_idx]["centroid"][0]),     
-                "azi_bin": int(detections[d_idx]["centroid"][0]),
+                "azi_bin": int(detections[d_idx]["centroid"][1]),
                 "centroid": detections[d_idx]["centroid"],
                 "status": "TENTATIVE",
-                "alive" : 1
+                "alive" : 1,
+                "enforced": False,
                 } 
-                log_track_data(ID, d_idx)
+                log_track_data(_as_track_id(ID), d_idx)
                 ID +=1
                 next_tracks.append(track)
 
@@ -366,7 +515,17 @@ def track_allData(penteract, cfar_params, tracking_params):
         # tracking_history.append(track)
     
     time_postprocessing_start = time.perf_counter()
-    final_signals = finalize_signal_logs(track_signal_logs, decay_alpha=0.15)
+    final_signals_normal = finalize_signal_logs(track_signal_logs, decay_alpha=0.15)
+    final_signals = {}
+    final_signals.update(enforced_signals)       # Dict order matters for UI: enforced tracks first.
+    final_signals.update(final_signals_normal)
+
+    if enforcement_cages:
+        tracking_history = [
+            enforced_history[i] + tracking_history[i]
+            for i in range(len(tracking_history))
+        ]
+
     time_TrackingEnd = time.perf_counter()
     print(f"Tracking - total time: {time_TrackingEnd- time_TrackingStart:.3f} s")
     print(f"CFAR: {time_cfar_sum:.3f}")

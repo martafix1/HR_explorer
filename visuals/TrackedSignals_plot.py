@@ -193,7 +193,10 @@ class PlotWindow(QWidget):
         self.track_selection_ctrl.set_newParams(tracks_dict)
         
         ## signals in tracks - assume all tracks have the same sigs
-        signals = list(self.tracking_data[0].keys()) 
+        # signals = list(self.tracking_data[0].keys()) 
+        first_key = next(iter(self.tracking_data))
+        signals = list(self.tracking_data[first_key].keys())
+
 
         if "frames" in signals:
             signals.remove("frames")
@@ -231,12 +234,12 @@ class PlotWindow(QWidget):
         for key_ID, value_ID in self.track_selection_ctrl.value().items():
             if key_ID == "Show":
                 continue
-            key_ID = int(key_ID) # tracking data is enumerated by ints
+            track_id = key_ID
             # print(f"ID:{key_ID} - {value_ID}")
             if value_ID == False:
                 continue
             
-            frames = self.tracking_data[key_ID]["frames"]
+            frames = self.tracking_data[track_id]["frames"]
             frames_mask = (frames >= frame_begin) & (frames <= frame_end)
             frames_visible = frames[frames_mask]
             # frames = self.sig_selection_ctrl.value()["frames"]
@@ -245,7 +248,7 @@ class PlotWindow(QWidget):
                     continue
                 if value_sig == False:
                     continue
-                signal = self.tracking_data[key_ID][key_sig]
+                signal = self.tracking_data[track_id][key_sig]
                 signal_visible = signal[frames_mask]
                 if len(signal_visible) == 0:
                     continue
