@@ -26,12 +26,12 @@ class SpectraInspectorWindow(QWidget):
         self.setWindowTitle("Spectra inspector")
         self.resize(1080, 720)
 
-        self.tracking_data: dict[int, dict[str, np.ndarray]] = {}
+        self.tracking_data: dict[str, dict[str, np.ndarray]] = {}
         self.params: dict[str, Any] = {"frame_index2time": 0.05}
         self.HRs: dict[str, dict[str, np.ndarray]] = {}
         self.vital_processing_values: dict[str, Any] = {}
         self.vital_signal_processor: Callable[..., np.ndarray] | None = None
-        self.enabled_track_ids: list[int] = []
+        self.enabled_track_ids: list[str] = []
         self._snapping_frame = False
         self._previous_inspector_methods: list[str] = []
 
@@ -177,21 +177,21 @@ class SpectraInspectorWindow(QWidget):
 
     def update_context(
         self,
-        tracking_data: dict[int, dict[str, np.ndarray]] | None,
+        tracking_data: dict[str, dict[str, np.ndarray]] | None,
         params: dict[str, Any] | None,
         HRs: dict[str, dict[str, np.ndarray]] | None = None,
         vital_processing_values: dict[str, Any] | None = None,
         vital_signal_processor: Callable[..., np.ndarray] | None = None,
-        enabled_track_ids: list[int] | None = None,
+        enabled_track_ids: list[str] | None = None,
     ) -> None:
         """Receive current VitalExtraction state."""
         self.initDone = False
-        self.tracking_data = tracking_data or {}
+        self.tracking_data = {str(key): val for key, val in (tracking_data or {}).items()}
         self.params = params or {"frame_index2time": 0.05}
         self.HRs = HRs or {}
         self.vital_processing_values = vital_processing_values or {}
         self.vital_signal_processor = vital_signal_processor
-        self.enabled_track_ids = enabled_track_ids or sorted(self.tracking_data.keys())
+        self.enabled_track_ids = [str(key) for key in (enabled_track_ids or sorted(self.tracking_data.keys()))]
 
         self._refresh_track_control()
         self._refresh_ref_control()
@@ -202,7 +202,7 @@ class SpectraInspectorWindow(QWidget):
         self.update_onSliderMove()
 
     def _refresh_track_control(self) -> None:
-        ids = [str(i) for i in self.enabled_track_ids if i in self.tracking_data]
+        ids = [str(i) for i in self.enabled_track_ids if str(i) in self.tracking_data]
         if not ids:
             ids = [str(i) for i in sorted(self.tracking_data.keys())] or ["0"]
         
@@ -234,13 +234,15 @@ class SpectraInspectorWindow(QWidget):
                 inputs.append(line_name)
         return inputs
 
-    def _selected_track_id(self) -> int:
-        try:
-            return int(self.track_ctrl.value())
-        except (TypeError, ValueError):
-            return 0
+    def _selected_track_id(self) -> str:
+        value = str(self.track_ctrl.value())
+        if value in self.tracking_data:
+            return value
+        if self.tracking_data:
+            return next(iter(self.tracking_data))
+        return "0"
 
-    def _track_frames(self, track_id: int) -> np.ndarray:
+    def _track_frames(self, track_id: str) -> np.ndarray:
         if track_id not in self.tracking_data:
             return np.array([], dtype=int)
         return np.asarray(self.tracking_data[track_id].get("frames", np.array([], dtype=int)))
@@ -280,7 +282,7 @@ class SpectraInspectorWindow(QWidget):
             self._snapping_frame = False
         return snapped_frame, snapped_sample
 
-    def _source_signals(self, track_id: int) -> dict[str, np.ndarray]:
+    def _source_signals(self, track_id: str) -> dict[str, np.ndarray]:
         if track_id not in self.tracking_data:
             return {}
         base = np.asarray(self.tracking_data[track_id].get("phase_unwrapped", np.array([])), dtype=float)
@@ -461,14 +463,14 @@ class SpectraInspectorWindow(QWidget):
                 self.spectrum_plot.addItem(pg.InfiniteLine(ref_freq, angle=90, pen=pen))
 
 
-def dummy_tracking_data() -> tuple[dict[int, dict[str, np.ndarray]], dict[str, Any], dict[str, dict[str, np.ndarray]]]:
+def dummy_tracking_data() -> tuple[dict[str, dict[str, np.ndarray]], dict[str, Any], dict[str, dict[str, np.ndarray]]]:
     frames = np.arange(0, 320)
     fs = 20.0
     t = frames / fs
     freq = 0.75 + 0.08 * np.sin(2 * np.pi * 0.02 * t)
     phase = np.cumsum(2 * np.pi * freq / fs)
     signal = np.sin(phase) + 0.2 * np.sin(2 * np.pi * 1.6 * t)
-    tracking = {0: {"frames": frames, "phase_unwrapped": signal}}
+    tracking = {"0": {"frames": frames, "phase_unwrapped": signal}}
     params = {"frame_index2time": 1 / fs, "i_Frames_begin": 0, "i_Frames_end": len(frames)}
     refs = {"dummy_hr": {"frames": frames, "hr": freq}}
     return tracking, params, refs

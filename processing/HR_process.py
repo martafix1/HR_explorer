@@ -39,6 +39,22 @@ def defaultSliders(frames,sliders):
     return sliders
 
 
+def _batchFFT(data : np.ndarray, axis = 0):
+    # dataOUT = np.empty((N_Frames,N_Doppler,N_Range,int(N_Azi*N_Ele)),dtype=np.complex64)
+    DataOUT_shape = data.shape
+    sizeAprox = np.prod(DataOUT_shape)*8 #size of A * size of B* datatype size, result in aprox Bytes
+    sizeLimit = int(0.8e9) # approx Bytes size
+    batch_num = (sizeAprox/sizeLimit)    
+    N_Frames = DataOUT_shape[0]
+    batch_size = int(np.ceil(N_Frames/batch_num))  
+
+
+    dataOUT = np.empty(DataOUT_shape,dtype=np.complex64)
+    for i in tqdm.tqdm(range(0,N_Frames,batch_size)):
+        i_end = min(i + batch_size, N_Frames)
+        dataOUT[i:i_end,:,:,:] = np.fft.fft(data[i:i_end,:,:,:],axis=axis)
+        
+    return dataOUT
 
 def process_A(frames,sliders):
     
@@ -80,13 +96,15 @@ def process_A(frames,sliders):
     
     time_start = time.perf_counter()    
     # process range
-    rangeData_lockedFrames = np.fft.fft(frames_lockedFrames,axis=3) # range fft
+    rangeData_lockedFrames = _batchFFT(frames_lockedFrames,axis=3)     
+    # rangeData_lockedFrames = np.fft.fft(frames_lockedFrames,axis=3) # range fft
     # reduce ranges 
     rangeData_lockedFramesRanges = rangeData_lockedFrames[:,:,:,i_Range_begin:i_Range_end]
 
     # doppler processing
     if(doppler_processing == "FFT"):
-        rangeDopplerData_lockedFramesRanges = np.fft.fft(rangeData_lockedFramesRanges,axis=1) # doppler fft
+        rangeDopplerData_lockedFramesRanges = _batchFFT(rangeData_lockedFramesRanges,axis=1) 
+        # rangeDopplerData_lockedFramesRanges = np.fft.fft(rangeData_lockedFramesRanges,axis=1) # doppler fft
     else:
         rangeDopplerData_lockedFramesRanges = rangeData_lockedFramesRanges
     # reduce doppler
@@ -119,8 +137,8 @@ def process_A(frames,sliders):
             i_end = min(i + batch_size, N_Frames)
 
             dataOUT[i:i_end,:,:,:] = np.tensordot(
-            (dataIN[i:i_end,:,:,:] / (doa_dict["calib"][None, None, :, None])).astype(np.complex64),      # shape: (d0, d1, n_channels, d3)
-            doa_dict["beam_vector_flat"].astype(np.complex64),    # shape: (n_channels, n_beams)
+            (dataIN[i:i_end,:,:,:] / (doa_dict["calib"][None, None, :, None])).astype(np.complex64,copy=False),      # shape: (d0, d1, n_channels, d3)
+            doa_dict["beam_vector_flat"].astype(np.complex64,copy=False),    # shape: (n_channels, n_beams)
             axes=([2], [0])                  # contract over channel axis
             )
 

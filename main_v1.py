@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QMessageBox,
     QScrollArea,
+    QFrame,
 )
 
 from FileIO.loadNPZ import loadNPZ
@@ -108,10 +109,17 @@ FILE_PRESETS: list[dict[str, Any]] = [
                 },
                 {
                     "id": "B",
-                    "r_begin": 18,
-                    "r_end": 22,
+                    "r_begin": 19,
+                    "r_end": 23,
                     "azi_begin": 5,
                     "azi_end": 6,
+                },
+                {
+                    "id": "R",
+                    "r_begin": 24,
+                    "r_end": 26,
+                    "azi_begin": 2,
+                    "azi_end": 4,
                 },
             ]
         },
@@ -119,7 +127,31 @@ FILE_PRESETS: list[dict[str, Any]] = [
     {
         "nickname": "22 michal auto radar horizontal driving",
         "path": "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_22_michalauto_radarvodorovne_jizda_rucedolekdyztoslo_24-04-2026_14-39-26.npz",
-        "params_override": {},
+        "params_override": {
+            "enforcement_cages": [
+                {
+                    "id": "A",
+                    "r_begin": 18,
+                    "r_end": 22,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "B",
+                    "r_begin": 19,
+                    "r_end": 23,
+                    "azi_begin": 5,
+                    "azi_end": 6,
+                },
+                {
+                    "id": "R",
+                    "r_begin": 24,
+                    "r_end": 26,
+                    "azi_begin": 2,
+                    "azi_end": 4,
+                },
+            ]
+        },
     },
     {
         "nickname": "16 michal auto radar vertical standing",
@@ -166,7 +198,7 @@ AUTORUN: dict[str, Any] = {
     "process_normal": True,
     "process_mesh": False,  # expensive; leave False unless you mean it
     "mesh_frame_skip_step": 40,
-    "launch_normal_windows": ["Phase Unwrap", "Tracking", "Tracked Signals", "Vitals"],
+    "launch_normal_windows": ["Phase Unwrap", "Tracking", "Tracked Signals"],
     "launch_mesh_window": False,
 }
 
@@ -259,7 +291,7 @@ class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("HR Explorer launcher v1")
-        self.resize(760, 900)
+        self.resize(1180, 760)
 
         self.loaded_data: dict[str, Any] | None = None
         self.frames = None
@@ -275,6 +307,7 @@ class MainWindow(QWidget):
         self.open_windows: list[dict[str, Any]] = []
         self.window_counts: dict[str, int] = {}
         self.latest_tracking_window: QWidget | None = None
+        self.tracking_source_label: QLabel | None = None
 
         self._build_ui()
         self._load_initial_file_if_possible()
@@ -303,7 +336,11 @@ class MainWindow(QWidget):
 
     def _build_file_selector(self, parent: QVBoxLayout) -> None:
         box = QGroupBox("Data file")
+        box.setMaximumHeight(118)
         layout = QGridLayout(box)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setVerticalSpacing(4)
+        layout.setHorizontalSpacing(8)
 
         self.file_combo = QComboBox()
         for preset in FILE_PRESETS:
@@ -313,26 +350,32 @@ class MainWindow(QWidget):
         self.path_edit = QLineEdit()
         self.path_edit.setPlaceholderText("Custom .npz path")
 
-        browse_btn = QPushButton("Browse...")
+        browse_btn = QPushButton("Browse")
+        browse_btn.setMaximumWidth(90)
         browse_btn.clicked.connect(self._browse_custom_file)
 
-        load_custom_btn = QPushButton("Load custom path")
+        load_custom_btn = QPushButton("Load custom")
+        load_custom_btn.setMaximumWidth(110)
         load_custom_btn.clicked.connect(self._load_custom_path)
 
         self.file_status = QLabel("No file loaded")
+        self.file_status.setWordWrap(False)
 
-        layout.addWidget(QLabel("Known files:"), 0, 0)
-        layout.addWidget(self.file_combo, 0, 1, 1, 2)
-        layout.addWidget(QLabel("Other file:"), 1, 0)
+        layout.addWidget(QLabel("Known:"), 0, 0)
+        layout.addWidget(self.file_combo, 0, 1, 1, 3)
+        layout.addWidget(QLabel("Other:"), 1, 0)
         layout.addWidget(self.path_edit, 1, 1)
         layout.addWidget(browse_btn, 1, 2)
-        layout.addWidget(load_custom_btn, 2, 1, 1, 2)
-        layout.addWidget(self.file_status, 3, 0, 1, 3)
+        layout.addWidget(load_custom_btn, 1, 3)
+        layout.addWidget(self.file_status, 2, 0, 1, 4)
+        layout.setColumnStretch(1, 1)
         parent.addWidget(box)
 
     def _build_normal_panel(self, parent: QVBoxLayout) -> None:
         box = QGroupBox("Normal processing / plot windows")
         layout = QVBoxLayout(box)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
 
         self.normal_param_editor = pctrl.DictTableControl(
             "Normal process_A params",
@@ -341,23 +384,50 @@ class MainWindow(QWidget):
         )
         layout.addWidget(self.normal_param_editor)
 
-        btn_row = QHBoxLayout()
+        lower = QHBoxLayout()
+        lower.setSpacing(12)
+
+        process_col = QVBoxLayout()
+        process_col.setSpacing(4)
         process_btn = QPushButton("Process normal data")
         process_btn.clicked.connect(self.process_normal_data)
-        update_btn = QPushButton("Update opened normal windows")
+        update_btn = QPushButton("Update opened windows")
         update_btn.clicked.connect(self.update_open_normal_windows)
-        btn_row.addWidget(process_btn)
-        btn_row.addWidget(update_btn)
-        layout.addLayout(btn_row)
+        process_col.addWidget(process_btn)
+        process_col.addWidget(update_btn)
+
+        self.tracking_source_label = QLabel("Tracking source: none")
+        self.tracking_source_label.setWordWrap(False)
+        process_col.addWidget(self.tracking_source_label)
+
+        tracked_btn = QPushButton("Launch Tracked Signals")
+        tracked_btn.clicked.connect(lambda: self.launch_normal_window("Tracked Signals"))
+        vitals_btn = QPushButton("Launch Vitals from current tracking")
+        vitals_btn.clicked.connect(self.launch_vitals_from_current_tracking)
+        process_col.addWidget(tracked_btn)
+        process_col.addWidget(vitals_btn)
+        process_col.addStretch(1)
+
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setFrameShadow(QFrame.Shadow.Sunken)
 
         launch_grid = QGridLayout()
+        launch_grid.setHorizontalSpacing(4)
+        launch_grid.setVerticalSpacing(4)
         for i, name in enumerate(self._normal_window_names()):
-            btn = QPushButton(f"Launch {name}")
+            btn = QPushButton(name)
+            btn.setMaximumHeight(26)
             btn.clicked.connect(lambda _checked=False, n=name: self.launch_normal_window(n))
             launch_grid.addWidget(btn, i // 2, i % 2)
-        layout.addLayout(launch_grid)
+
+        lower.addLayout(process_col, 1)
+        lower.addWidget(divider)
+        lower.addLayout(launch_grid, 2)
+        layout.addLayout(lower)
 
         self.normal_status = QLabel("Normal penteract: not processed")
+        self.normal_status.setWordWrap(False)
         layout.addWidget(self.normal_status)
         parent.addWidget(box)
 
@@ -368,7 +438,7 @@ class MainWindow(QWidget):
         self.mesh_param_editor = pctrl.DictTableControl(
             "DoA_3Dmesh process_A params",
             _params_for_editor(self.mesh_params),
-            orientation="vertical",
+            orientation="horizontal",
         )
         layout.addWidget(self.mesh_param_editor)
 
@@ -520,7 +590,7 @@ class MainWindow(QWidget):
     # Window launching / updating
     # ------------------------------------------------------------------
     def _normal_window_names(self) -> list[str]:
-        return ["Phase Unwrap", "HR STFT", "DoA 2D Azi Plane", "Tracking", "Tracked Signals", "Vitals"]
+        return ["Phase Unwrap", "HR STFT", "DoA 2D Azi Plane", "Tracking"]
 
     def _normal_specs(self) -> dict[str, Callable[[], QWidget]]:
         return {
@@ -539,6 +609,9 @@ class MainWindow(QWidget):
                 return
         window = self._normal_specs()[name]()
         self._register_window(window, name, panel="normal")
+        if name == "Tracking":
+            self.latest_tracking_window = window
+            self._refresh_tracking_source_label()
         window.show()
 
     def launch_mesh_window(self) -> None:
@@ -575,6 +648,25 @@ class MainWindow(QWidget):
         window.setWindowTitle(title)
         self.open_windows.append({"window": window, "name": name, "panel": panel, "number": number})
 
+    def _tracking_source_text(self) -> str:
+        if self.latest_tracking_window is None or self.latest_tracking_window.isHidden():
+            return "Tracking source: none"
+        return f"Tracking source: {self.latest_tracking_window.windowTitle()}"
+
+    def _refresh_tracking_source_label(self) -> None:
+        if self.tracking_source_label is not None:
+            self.tracking_source_label.setText(self._tracking_source_text())
+
+    def launch_vitals_from_current_tracking(self) -> None:
+        if self.latest_tracking_window is None or self.latest_tracking_window.isHidden():
+            QMessageBox.warning(self, "No tracking source", "Launch/select a Tracking window first.")
+            self._refresh_tracking_source_label()
+            return
+        window = VitalsPlot.PlotWindow()
+        self._update_normal_window(window, "Vitals")
+        self._register_window(window, "Vitals", panel="normal")
+        window.show()
+
     def _window_params(self, name: str, params: dict[str, Any]) -> dict[str, Any]:
         out = dict(params)
         number = self.window_counts.get(name, 0) + 1
@@ -597,6 +689,7 @@ class MainWindow(QWidget):
         elif name == "Tracking":
             _safe_call_update(window, ("update_newData", "update_NewData", "update_onNewData"), self.normal_penteract, params)
             self.latest_tracking_window = window
+            self._refresh_tracking_source_label()
         elif name == "Tracked Signals":
             if self.latest_tracking_window is not None:
                 window.assignDataRetrievingFunction(self.latest_tracking_window.returnTrackedSignals)  # type: ignore[attr-defined]
@@ -654,7 +747,9 @@ class MainWindow(QWidget):
         if AUTORUN.get("process_mesh", False):
             self.process_mesh_data()
         for name in AUTORUN.get("launch_normal_windows", []):
-            if name in self._normal_specs():
+            if name == "Vitals":
+                self.launch_vitals_from_current_tracking()
+            elif name in self._normal_specs():
                 self.launch_normal_window(name)
         if AUTORUN.get("launch_mesh_window", False):
             self.launch_mesh_window()
