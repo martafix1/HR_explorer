@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QApplication, QPushButton, QSplitter
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QGridLayout, QApplication, QPushButton, QSplitter, QFileDialog
 from PySide6.QtCore import Qt
 
 import numpy as np
@@ -7,6 +7,7 @@ import pyqtgraph as pg
 import matplotlib.pyplot as plt
 
 import re # regex
+import json
 import os, sys,types
 from typing import Callable, Any
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
@@ -14,6 +15,12 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 import visuals.param_controls as pctrl
 import visuals.SpectraInspector as SpectraInspector
 import processing.slidingFFT as slidingFFT
+
+DEFAULT_EXPORT_DIR = "."
+DEFAULT_EXPORT_BASENAME = "vitals_export"
+
+def _safe_npz_key(text: Any) -> str:
+    return re.sub(r"[^0-9A-Za-z_.-]+", "_", str(text)).strip("_") or "unnamed"
 
 def phaseUnwrapping(data):
     phase = np.angle(data)
@@ -80,7 +87,7 @@ class PlotWindow(QWidget):
         self.second_plot_ctrl = pctrl.ChecksetControl("Second plot",labels=["Show second plot", "Link X axes", "Link Y axes"], defaults=[False, True, False])
         ctrl_panel.add(self.second_plot_ctrl,row=0,col=2)
 
-        self.export_btn_ctrl = pctrl.ButtonControl("Export", button_label="Export CSV")
+        self.export_btn_ctrl = pctrl.ButtonControl("Export", button_label="Export NPZ")
         self.export_btn_ctrl._btn.clicked.connect(self.exportData)
         ctrl_panel.add(self.export_btn_ctrl,row=1,col=1)
 
@@ -182,16 +189,141 @@ class PlotWindow(QWidget):
         self.spectraInspector = None
 
     def exportData(self):
-        if not hasattr(self, "data2export"):
+        if not hasattr(self, "tracking_data") or not self.tracking_data:
+            self.export_btn_ctrl.set_warning("Load tracking data first")
             return
-        np.savetxt(
-            "trackingOutput.csv",
-            self.data2export,
-            delimiter=",",
-            header=self.dataExport_col_names,
-            comments="",
-            fmt="%.6f",
+        if not hasattr(self, "params"):
+            self.export_btn_ctrl.set_warning("No params available")
+            return
+
+        default_name = str(self.params.get("_data_nickname", DEFAULT_EXPORT_BASENAME))
+        default_name = _safe_npz_key(default_name) + "_vitals_export.npz"
+        default_path = os.path.join(DEFAULT_EXPORT_DIR, default_name)
+        save_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Export selected tracks + vitals processing",
+            default_path,
+            "NumPy compressed archive (*.npz);;All files (*)",
         )
+        if not save_path:
+            return
+        if not save_path.lower().endswith(".npz"):
+            save_path += ".npz"
+
+        try:
+            export_dict, metadata = self._build_export_npz_payload()
+            export_dict["metadata_json"] = np.array(json.dumps(metadata, indent=2, default=self._json_default))
+            np.savez_compressed(save_path, **export_dict)
+            self.export_btn_ctrl.clear_state()
+            print(f"Exported vitals NPZ: {save_path}")
+        except Exception as exc:
+            self.export_btn_ctrl.set_warning(f"Export failed: {exc}")
+            print(f"Export failed: {exc}")
+
+    def _json_default(self, obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.generic):
+            return obj.item()
+        return str(obj)
+
+    def _selected_track_ids_for_export(self) -> list[str]:
+        if not hasattr(self, "tracking_data"):
+            return []
+        selection = self.track_selection_ctrl.value()
+        show_mode = selection.get("Show", "Select")
+        if show_mode == "None":
+            return []
+        if show_mode == "All":
+            return [str(key) for key in self.tracking_data.keys()]
+
+        ids = []
+        for key, enabled in selection.items():
+            if key == "Show":
+                continue
+            if enabled and str(key) in self.tracking_data:
+                ids.append(str(key))
+        return ids
+
+    def _active_line_rows(self) -> dict[str, Any]:
+        rows = self.sig_processing1_ctrl.value()
+        return {
+            line_name: dict(line_vals)
+            for line_name, line_vals in rows.items()
+            if line_vals.get("Method", "None") != "None"
+        }
+
+    def _compute_line_outputs_for_track(self, track_id: str, active_rows: dict[str, Any]) -> dict[str, np.ndarray]:
+        outputs: dict[str, np.ndarray] = {}
+        base = np.asarray(self.tracking_data[track_id].get("phase_unwrapped", np.array([])), dtype=float)
+        signal_dict: dict[str, np.ndarray] = {"Ph. unwrap": base, "Line 0": base}
+
+        for line_name, line_vals in active_rows.items():
+            source_name = line_vals.get("Input", "Ph. unwrap")
+            if source_name not in signal_dict:
+                print(f"Export skipped {line_name} for track {track_id}: missing input {source_name}")
+                continue
+            try:
+                processed = self.signalProcessing(
+                    signal=signal_dict[source_name],
+                    method=line_vals.get("Method", "None"),
+                    m_params=line_vals,
+                )
+            except Exception as exc:
+                print(f"Export skipped {line_name} for track {track_id}: {exc}")
+                continue
+            processed = np.asarray(processed)
+            signal_dict[line_name] = processed
+            outputs[line_name] = processed
+        return outputs
+
+    def _build_export_npz_payload(self) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        selected_ids = self._selected_track_ids_for_export()
+        if not selected_ids:
+            raise ValueError("No tracks selected")
+
+        active_rows = self._active_line_rows()
+        export: dict[str, np.ndarray] = {}
+        metadata: dict[str, Any] = {
+            "format": "HR_explorer_vitals_export_npz_v1",
+            "data_nickname": self.params.get("_data_nickname", ""),
+            "selected_track_ids": selected_ids,
+            "params": self.params,
+            "active_lines": active_rows,
+            "raw_tracking_signals": {},
+            "line_outputs": {},
+            "hr_signals": {},
+        }
+
+        for track_id in selected_ids:
+            track = self.tracking_data[track_id]
+            track_key = _safe_npz_key(track_id)
+            metadata["raw_tracking_signals"][track_id] = list(track.keys())
+            for sig_name, sig_val in track.items():
+                arr = np.asarray(sig_val)
+                export[f"tracks/{track_key}/{_safe_npz_key(sig_name)}"] = arr
+
+            line_outputs = self._compute_line_outputs_for_track(track_id, active_rows)
+            metadata["line_outputs"][track_id] = {}
+            # Treat unwrapped phase as Line 0 for the external script.
+            export[f"lines/{track_key}/Line_0"] = np.asarray(track.get("phase_unwrapped", np.array([])))
+            metadata["line_outputs"][track_id]["Line 0"] = {
+                "Method": "identity",
+                "Input": "phase_unwrapped",
+                "Description": "Unwrapped phase, exported as baseline line",
+            }
+            for line_name, arr in line_outputs.items():
+                export[f"lines/{track_key}/{_safe_npz_key(line_name)}"] = np.asarray(arr)
+                metadata["line_outputs"][track_id][line_name] = active_rows[line_name]
+
+        for ref_name, ref_data in getattr(self, "HRs", {}).items():
+            ref_key = _safe_npz_key(ref_name)
+            metadata["hr_signals"][ref_name] = list(ref_data.keys()) if isinstance(ref_data, dict) else []
+            if isinstance(ref_data, dict):
+                for sig_name, sig_val in ref_data.items():
+                    export[f"hr/{ref_key}/{_safe_npz_key(sig_name)}"] = np.asarray(sig_val)
+
+        return export, metadata
 
     def assignDataRetrievingFunction(self,func):
         if callable(func):
@@ -316,12 +448,12 @@ class PlotWindow(QWidget):
                 "band pass": {"cutoff0 [Hz]": 0.2, "cutoff1 [Hz]":0.6, "order": 4},
                 "inst freq Hilbert": {},
                 "inst ampl Hilbert": {},
-                "inst f slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":80,
-                                        "fixedFFT_size":200, "freqRangeStart":0.1, "freqRangeStop":2.0,
-                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming","blackman"]  },
-                "inst A slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":80,
-                                        "fixedFFT_size":200, "freqRangeStart":0.1, "freqRangeStop":2.0,
-                                        "parabolicInterpolation": False, "window": ["rect", "hann", "hamming","blackman"]  }
+                "inst f slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":120,
+                                        "fixedFFT_size":200, "freqRangeStart":0.2, "freqRangeStop":0.6,
+                                        "parabolicInterpolation": True, "window": ["rect", "hann", "hamming","blackman"]  },
+                "inst A slidingFFT": {  "initFrames": 20, "stepFrames":10, "sig_sample":120,
+                                        "fixedFFT_size":200, "freqRangeStart":0.2, "freqRangeStop":0.6,
+                                        "parabolicInterpolation": True, "window": ["rect", "hann", "hamming","blackman"]  }
             }
         if method is None or signal is None:# describe avalible methods
             return capabalities
@@ -448,13 +580,13 @@ class PlotWindow(QWidget):
 
     def buildSignalControlDict(self, control_values: dict | None = None, lastMethods: list | None = None , theControl_forWarnRaising = None):
         capabalities_dict : dict[str, dict[str, Any]] =  self.signalProcessing(signal=None)  # type: ignore
-        nLines = 5
+        nLines = 8
         # layout = {"Plot": False, "Method": ["None"], "Input": ["hihi"]}
         
 
 
         if control_values is None:
-            selected_methods = ["None","detrending","band pass","None","None"] # needs to be inputed later
+            selected_methods = ["None","detrending","band pass","inst f slidingFFT","inst A slidingFFT","None","None","None"] # needs to be inputed later
         else:
             selected_methods = []
             for i,name in enumerate(control_values.keys()):

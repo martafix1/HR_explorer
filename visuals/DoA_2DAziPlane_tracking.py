@@ -366,6 +366,24 @@ class PlotWindow(QWidget):
                 self._polar_point(r0, a1_edge),
                 self._polar_point(r0, a0_edge),
             ]
+            if abs(a0-a1)>1:
+                border_points = []
+                line_r1 = []
+                line_r0 = []
+                border_points.append(self._polar_point(r1, a0_edge))
+                for aInt in range(a0,a1+1):
+                    aint_edge = azi_points[0] + aInt * d_azi - d_azi / 2
+                    line_r1.append(self._polar_point(r1, aint_edge)) 
+                
+                for aInt in range(a1,a0-1,-1): # needs opposite direction
+                    aint_edge = azi_points[0] + aInt * d_azi - d_azi / 2
+                    line_r0.append(self._polar_point(r0, aint_edge)) 
+
+                border_points = line_r1
+                border_points += line_r0
+                border_points.append(self._polar_point(r1, a0_edge)) # close the line
+
+
             xs, ys = zip(*border_points)
             border = pg.PlotDataItem(xs, ys, pen=pg.mkPen((*color, 230), width=2))
             self.plot_item.addItem(border)

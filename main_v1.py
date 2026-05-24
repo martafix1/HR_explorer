@@ -188,6 +188,115 @@ FILE_PRESETS: list[dict[str, Any]] = [
         "nickname": "26 martinesn maybe 20Hz standing",
         "path": "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_26_martinesn_40hz_again_standing_07-05-2026_17-27-52.npz",
         "params_override": {"frame_index2time": 1 / 20},
+    },# 
+        {
+        "nickname": "28 Kofola random",
+        "path": "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_28_finalwithbagofkofola_2_18-05-2026_11-52-05.npz",
+        "params_override": {
+            "enforcement_cages": [
+                {
+                    "id": "A",
+                    "r_begin": 20,
+                    "r_end": 23,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "B",
+                    "r_begin": 19,
+                    "r_end": 24,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "RK",
+                    "r_begin": 32,
+                    "r_end": 35,
+                    "azi_begin": 5,
+                    "azi_end": 6,
+                },
+                                {
+                    "id": "RU",
+                    "r_begin": 30,
+                    "r_end": 32,
+                    "azi_begin": 2,
+                    "azi_end": 4,
+                },
+            ]
+        },
+    },
+    {
+        "nickname": "31 Kofola big drive",
+        "path": "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_31_finalwithbagofkofola_drive3_18-05-2026_12-18-50.npz",
+        "params_override": {
+            "enforcement_cages": [
+                {
+                    "id": "A",
+                    "r_begin": 20,
+                    "r_end": 23,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "B",
+                    "r_begin": 19,
+                    "r_end": 24,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "RK",
+                    "r_begin": 32,
+                    "r_end": 35,
+                    "azi_begin": 5,
+                    "azi_end": 6,
+                },
+                                {
+                    "id": "RU",
+                    "r_begin": 30,
+                    "r_end": 32,
+                    "azi_begin": 2,
+                    "azi_end": 4,
+                },
+            ]
+        },
+    },
+    # 
+    {
+        "nickname": "32 Kofola parking",
+        "path": "../VScodeSlozka/ros2-devcontainer-example-ws/DATA_UNrosed/unR_meas_32_finalwithbagofkofola_parking_18-05-2026_12-30-34.npz",
+        "params_override": {
+            "enforcement_cages": [
+                {
+                    "id": "A",
+                    "r_begin": 20,
+                    "r_end": 23,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "B",
+                    "r_begin": 19,
+                    "r_end": 24,
+                    "azi_begin": 3,
+                    "azi_end": 4,
+                },
+                {
+                    "id": "RK",
+                    "r_begin": 32,
+                    "r_end": 35,
+                    "azi_begin": 5,
+                    "azi_end": 6,
+                },
+                                {
+                    "id": "RU",
+                    "r_begin": 30,
+                    "r_end": 32,
+                    "azi_begin": 2,
+                    "azi_end": 4,
+                },
+            ]
+        },
     },
 ]
 

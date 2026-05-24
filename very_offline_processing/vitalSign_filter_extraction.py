@@ -15,8 +15,8 @@ import mplcursors
 params = {  "DoA_azi_N_elements":8,
             "DoA_ele_N_elements":1,
             "DoA_azi_range_degs":90, "DoA_ele_range_degs":30,
-            # "Channel_processing":"DoA_customFFT",
-            "Channel_processing":"None",
+            "Channel_processing":"DoA_customFFT",
+            # "Channel_processing":"None",
             "Doppler_processing":"FFT",
 
             "range_index2dist"  : 0.046,
@@ -84,13 +84,13 @@ print("To plot detrending")
 order_DeTren = 4
 fc_DeTren = 0.1
 b_DeTren, a_DeTren = scipy.signal.butter(order_DeTren, fc_DeTren, btype='highpass',fs = fs)
-DeTren_signal = scipy.signal.filtfilt(b_DeTren, a_DeTren, phase_unwrp)
+DeTren_signal = scipy.signal.lfilter(b_DeTren, a_DeTren, phase_unwrp)
 
 order_DeTren_02 = 4
 # fc_DeTren_02 = 0.9
 fc_DeTren_02 = 0.2
 b_DeTren_02, a_DeTren_02 = scipy.signal.butter(order_DeTren, fc_DeTren_02, btype='highpass',fs = fs)
-DeTren_signal_02 = scipy.signal.filtfilt(b_DeTren_02, a_DeTren_02, phase_unwrp)
+DeTren_signal_02 = scipy.signal.lfilter(b_DeTren_02, a_DeTren_02, phase_unwrp)
 
 
 plt.figure()
@@ -286,7 +286,8 @@ fc_BR = (0.2,0.8)  # Hz, cutoff freq
 order_BR = 4  # good default
 
 b_BR, a_BR = scipy.signal.butter(order_BR, fc_BR, btype='bandpass',fs = fs)
-BR_signal = scipy.signal.filtfilt(b_BR, a_BR, phase_unwrp)
+BR_signal = scipy.signal.lfilter(b_BR, a_BR, phase_unwrp)
+
 
 
 fc_HR = (0.8,3)  # Hz, cutoff freq
@@ -294,7 +295,7 @@ fc_HR = (0.8,3)  # Hz, cutoff freq
 order_HR = 4  # good default
 
 b_HR, a_HR = scipy.signal.butter(order_HR, fc_HR, btype='bandpass',fs = fs)
-HR_signal = scipy.signal.filtfilt(b_HR, a_HR, phase_unwrp)
+HR_signal = scipy.signal.lfilter(b_HR, a_HR, phase_unwrp)
 
 plt.figure()
 plt.subplot(2, 1, 1)
