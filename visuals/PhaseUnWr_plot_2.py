@@ -79,7 +79,7 @@ class PlotWindow(QWidget):
 
         self.doppler_ctrl = pctrl.RangeControl(
             "Doppler range", min_val=0, max_val=100,
-            default=(0, 50), unit="s",
+            default=(0, 50), unit="Hz",
         )
         ctrl_panel.add(self.doppler_ctrl, row=0, col=3)
 

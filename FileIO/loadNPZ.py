@@ -6,7 +6,7 @@ import json
 
 filePath = "Projects/TestProject/analysis_modules/plot_radar_ampl/data/meas7_unrosed.npz"
 
-def loadNPZ(path) -> dict : 
+def loadNPZ(path) -> dict:
 
     # outputDict = dict()
 
